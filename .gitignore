@@ -13,3 +13,14 @@
 # only node_modules/dist build artifacts remain here)
 /validation/
 reference/react-oidc/node_modules/
+
+# Metadata pulled from the live Hasura deployments, plus the role-mapping notes
+# worked up from it. This repository is public: the table names, column names,
+# and permission rules of a production database are not part of the auth
+# installer this repo ships, and publishing them discloses the shape of a live
+# system for no benefit to a consumer of the installer.
+/data/
+
+# NTFS alternate-data-stream markers. Windows stamps these on downloaded files
+# and WSL surfaces each one as a separate real file next to its parent.
+*:Zone.Identifier
