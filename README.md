@@ -16,7 +16,7 @@ boundary. (Branch tips `#angular` / `#react` track the latest build.)
 **Angular** (14+, standalone or NgModule):
 
 ```bash
-npm i git+https://github.com/ntanner-ctrl/s4-authentication.git#angular-v0.3.1
+npm i git+https://github.com/RDS-Hospitality/s4-authentication.git#angular-v0.3.1
 ng g s4-auth-angular:ng-add        # prompts for Cognito values, or pass --flags
 ```
 
@@ -24,7 +24,7 @@ ng g s4-auth-angular:ng-add        # prompts for Cognito values, or pass --flags
 empty target, or injects auth into an existing one.
 
 ```bash
-npx git+https://github.com/ntanner-ctrl/s4-authentication.git#react-v0.3.2 . \
+npx git+https://github.com/RDS-Hospitality/s4-authentication.git#react-v0.3.2 . \
   --user-pool-id <id> --client-id <id> --cognito-domain <host> --region <region>
 ```
 

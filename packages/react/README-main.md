@@ -16,7 +16,7 @@ One auto-detecting command. It inspects the target directory and picks the path 
 ```bash
 # add auth to the app in the current directory (pinned to a release tag — reproducible,
 # the right posture for an auth boundary):
-npx git+https://github.com/ntanner-ctrl/s4-authentication.git#react-v0.3.2 . \
+npx git+https://github.com/RDS-Hospitality/s4-authentication.git#react-v0.3.2 . \
   --user-pool-id us-east-1_xxxxxxxxx \
   --client-id xxxxxxxxxxxxxxxxxxxxxxxxxx \
   --cognito-domain your-prefix.auth.us-east-1.amazoncognito.com \

@@ -11,10 +11,10 @@ everything at its root; it is regenerated per release and is not where developme
 
 ```bash
 # 1. add the Angular package — pinned to a release tag (reproducible; recommended for auth)
-npm i git+https://github.com/ntanner-ctrl/s4-authentication.git#angular-v0.3.1
+npm i git+https://github.com/RDS-Hospitality/s4-authentication.git#angular-v0.3.1
 
 #    …or track the branch tip for the latest build:
-#    npm i git+https://github.com/ntanner-ctrl/s4-authentication.git#angular
+#    npm i git+https://github.com/RDS-Hospitality/s4-authentication.git#angular
 
 # 2. run the installer schematic (prompts for pool values, or pass flags)
 ng g s4-auth-angular:ng-add \
