@@ -8,18 +8,22 @@
  * Realizes C5 (login idempotence): if already authenticated, this route forwards to the
  * post-login target WITHOUT re-initiating sign-in and WITHOUT stacking history (replace).
  *
+ * Fails visibly: a sign-in error forwarded by CallbackPage (router state, see loginState.ts)
+ * or thrown by signIn() itself is rendered above the provider buttons, never swallowed.
+ *
  * Ships the standardized branded card (`auth.css`) — gradient page, white card, inlined
  * provider marks — matching angular-amplify-v6/login so both adapters present the SAME
  * login across the fleet. A consumer MAY restyle with its own design system, but the
  * provider-loop + signIn wiring is the part that must not be forked.
  */
-import { type ReactElement } from 'react';
+import { type ReactElement, useState } from 'react';
 import { Navigate, useLocation } from 'react-router';
 
 import '../auth.css';
 import { authConfig, type Provider } from '../auth.config';
 import { resolvePostLoginTarget } from '../auth/RequireAuth';
 import { useAuthService } from '../auth/useAuthService';
+import { readLoginState } from './loginState';
 
 const PROVIDER_LABEL: Record<Provider, string> = {
   google: 'Continue with Google',
@@ -50,6 +54,9 @@ const PROVIDER_LOGO: Record<Provider, ReactElement> = {
 export function LoginPage() {
   const { isAuthenticated, isLoading, signIn } = useAuthService();
   const location = useLocation();
+  const { returnUrl, error: forwardedError } = readLoginState(location.state);
+  // Seeded from the forwarded error; cleared on the next attempt, replaced if that throws.
+  const [error, setError] = useState<string | undefined>(forwardedError);
 
   if (isLoading) {
     return <div className="auth-login__status">Checking authentication…</div>;
@@ -62,18 +69,25 @@ export function LoginPage() {
     return <Navigate to={target} replace />;
   }
 
-  const returnUrl =
-    (location.state &&
-      typeof location.state === 'object' &&
-      'returnUrl' in location.state &&
-      typeof (location.state as { returnUrl: unknown }).returnUrl === 'string'
-      ? (location.state as { returnUrl: string }).returnUrl
-      : undefined) ?? undefined;
+  const startSignIn = async (provider: Provider) => {
+    setError(undefined);
+    try {
+      await signIn(provider, returnUrl);
+      // On success the browser navigates away to the IdP; nothing more to do.
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start sign-in. Please try again.');
+    }
+  };
 
   return (
     <div className="auth-login">
       <main className="auth-login__card" role="main">
         <h1 className="auth-login__title">{authConfig.appTitle ?? 'Sign in'}</h1>
+        {error && (
+          <div className="auth-login__error" role="alert">
+            {error}
+          </div>
+        )}
         <div className="auth-login__providers">
           {/* C8 — one button per ENABLED provider, from config. */}
           {authConfig.providers.map((provider) => (
@@ -81,7 +95,7 @@ export function LoginPage() {
               key={provider}
               type="button"
               className={`auth-login__btn auth-login__btn--${provider}`}
-              onClick={() => void signIn(provider, returnUrl)}
+              onClick={() => void startSignIn(provider)}
             >
               {PROVIDER_LOGO[provider]}
               <span>{PROVIDER_LABEL[provider]}</span>

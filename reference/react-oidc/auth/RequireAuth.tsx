@@ -18,6 +18,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router';
 
 import { authConfig } from '../auth.config';
+import { readLoginState, type LoginLocationState } from '../login/loginState';
 import { useAuthService } from './useAuthService';
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -36,8 +37,8 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   }
 
   // C6 — preserve the deep-linked protected URL as returnUrl; fail closed to /login.
-  const returnUrl = location.pathname + location.search;
-  return <Navigate to="/login" replace state={{ returnUrl }} />;
+  const state: LoginLocationState = { returnUrl: location.pathname + location.search };
+  return <Navigate to="/login" replace state={state} />;
 }
 
 /**
@@ -53,13 +54,5 @@ export function resolvePostLoginTarget(
   if (typeof oidcState === 'string' && oidcState.length > 0) {
     return oidcState;
   }
-  if (
-    routerState &&
-    typeof routerState === 'object' &&
-    'returnUrl' in routerState &&
-    typeof (routerState as { returnUrl: unknown }).returnUrl === 'string'
-  ) {
-    return (routerState as { returnUrl: string }).returnUrl;
-  }
-  return authConfig.postLoginRoute;
+  return readLoginState(routerState).returnUrl ?? authConfig.postLoginRoute;
 }

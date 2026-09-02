@@ -18,8 +18,9 @@ behavior was validated when apps adopted it (see "Runtime-verified").
 | `auth/useIdleTimeout.ts` | C3 idle timeout |
 | `auth/RequireAuth.tsx` | C7 fail-closed guard, C6 returnUrl |
 | `auth/RequireRole.tsx` | claim-based authz on verified token |
-| `login/LoginPage.tsx` | C8 provider-from-config card |
-| `login/CallbackPage.tsx` | C5 callback history replacement, C6 landing |
+| `login/LoginPage.tsx` | C8 provider-from-config card; renders a forwarded or thrown sign-in error |
+| `login/CallbackPage.tsx` | C5 callback history replacement, C6 landing; forwards a failed exchange to `/login` |
+| `login/loginState.ts` | Typed router-state contract (`returnUrl`, `error`) shared by RequireAuth, CallbackPage and LoginPage |
 | `auth.css` | Standardized branded login card (gradient page, card, inlined provider marks) — matches the Angular adapter |
 
 ## Clause coverage

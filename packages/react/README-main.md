@@ -71,7 +71,7 @@ instead.
 ## What the installer does
 
 - **Copies** the adapter into `src/` — `auth.config.ts`, `auth/` (AuthRoot, RequireAuth, RequireRole,
-  useAuthService, useIdleTimeout), `login/` (LoginPage, CallbackPage), `auth.css`, and `vite-env.d.ts`.
+  useAuthService, useIdleTimeout), `login/` (LoginPage, CallbackPage, loginState), `auth.css`, and `vite-env.d.ts`.
   If the app already has its own `src/vite-env.d.ts`, that file is **left untouched** and the adapter's
   ambient types go to `src/s4-auth-env.d.ts` beside it, so your `vite/client` reference survives.
 - **Installs** `react-oidc-context`, `oidc-client-ts`, and a React Router v7 package via the detected

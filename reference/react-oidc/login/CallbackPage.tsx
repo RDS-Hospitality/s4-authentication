@@ -17,6 +17,7 @@ import { useAuth } from 'react-oidc-context';
 
 import '../auth.css';
 import { resolvePostLoginTarget } from '../auth/RequireAuth';
+import { type LoginLocationState } from './loginState';
 
 export function CallbackPage() {
   const auth = useAuth();
@@ -33,7 +34,8 @@ export function CallbackPage() {
       navigate(target, { replace: true });
     } else if (auth.error) {
       // Fail closed, VISIBLY (C7 spirit): land on /login with the error, replacing history.
-      navigate('/login', { replace: true, state: { error: auth.error.message } });
+      const state: LoginLocationState = { error: auth.error.message };
+      navigate('/login', { replace: true, state });
     }
   }, [auth.isLoading, auth.isAuthenticated, auth.error, auth.user, navigate]);
 

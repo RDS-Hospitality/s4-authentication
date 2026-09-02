@@ -55,6 +55,16 @@
    offline/kiosk networks). --google / --microsoft kept as host styling hooks. */
 .auth-login__logo { width: 18px; height: 18px; flex-shrink: 0; }
 
+/* Failed sign-in notice forwarded by CallbackPage (or a signIn() that threw). Mirrors
+   angular-amplify-v6's .auth-card__error so both adapters fail visibly the same way. */
+.auth-login__error {
+  background: #fdecea;
+  color: #611a15;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
 /* Full-viewport status / callback states share the login background. */
 .auth-login__status,
 .auth-callback__status,
