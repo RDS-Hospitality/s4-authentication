@@ -30,6 +30,10 @@ import { AuthService } from './auth.service';
  *
  * NOTE (C7): there is intentionally no escape hatch — no query param, env flag,
  * or kill-switch grants access. The ONLY "allow" path is a verified session.
+ * Who may sign in at all is decided at the identity provider (the pool's
+ * inbound-federation gate), not here; what a signed-in user may do is decided by
+ * the data layer from the token's role claims (C9) and, for route-level gating,
+ * by `roleGuard` — this guard answers only "is there a verified session".
  */
 export const authGuard: CanActivateFn = async (
   _route: ActivatedRouteSnapshot,
@@ -40,8 +44,7 @@ export const authGuard: CanActivateFn = async (
 
   try {
     // Truth comes from a SDK/JWKS-verified session (C2), not a local flag.
-    const ok = await auth.isAuthenticated();
-    if (ok) {
+    if (await auth.isAuthenticated()) {
       return true;
     }
     // C6 — preserve the deep-linked protected URL as returnUrl.

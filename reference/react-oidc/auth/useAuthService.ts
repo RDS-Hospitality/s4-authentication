@@ -17,6 +17,7 @@ import {
   COGNITO_IDP,
   type Provider,
 } from '../auth.config';
+import { readDefaultRole, readRoles } from './roles';
 
 export interface AuthService {
   /** C2/C7 — truth from the library's verified session, never a hand-decode. */
@@ -26,6 +27,10 @@ export interface AuthService {
   /** Non-trust display fields only (e.g. greeting). Never gate access on these. */
   email?: string;
   userId?: string;
+  /** C9 — roles minted on the verified ID token (`roleClaim`). `[]` when none. RequireRole gates on these. */
+  roles: string[];
+  /** C9 — default role (`defaultRoleClaim`), display only. */
+  role?: string;
   /** C1/C8 — start Authorization Code + PKCE for a configured provider. */
   signIn: (provider: Provider, returnUrl?: string) => Promise<void>;
   /** C4 — complete logout: revoke + clear + Cognito /logout redirect. */
@@ -94,6 +99,8 @@ export function useAuthService(): AuthService {
     // `profile` is the SDK-parsed payload of an already-verified id_token — DISPLAY only.
     email: typeof auth.user?.profile.email === 'string' ? auth.user.profile.email : undefined,
     userId: auth.user?.profile.sub,
+    roles: readRoles(auth.user?.profile),
+    role: readDefaultRole(auth.user?.profile),
     signIn,
     logout,
     getAccessToken,

@@ -11,4 +11,6 @@ export interface Schema {
   providers: string;
   /** Login-card heading (defaults to "Sign in"). */
   appTitle?: string;
+  /** Post-login landing route (C6). Defaults to "/". Must start with "/". */
+  postLoginRoute?: string;
 }

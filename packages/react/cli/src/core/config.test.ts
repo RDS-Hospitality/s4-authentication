@@ -33,6 +33,14 @@ test("providers flag splits a comma list into the patch", () => {
   expect(r.patch.providers).toEqual(["google", "microsoft"]);
 });
 
+test("postLoginRouteError accepts in-app paths and rejects the rest", async () => {
+  const { postLoginRouteError } = await import("./config");
+  expect(postLoginRouteError("/")).toBeNull();
+  expect(postLoginRouteError("/dashboard?tab=1")).toBeNull();
+  expect(postLoginRouteError("dashboard")).toMatch(/must start with/);
+  expect(postLoginRouteError("https://example.com/home")).toMatch(/must start with/);
+});
+
 test("app-title and post-login-route map into the patch", () => {
   const r = resolveFromFlags({ "app-title": "Acme Portal", "post-login-route": "/dashboard" });
   expect(r.patch.appTitle).toBe("Acme Portal");

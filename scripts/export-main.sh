@@ -23,7 +23,10 @@
 #   --only     publish a single framework (default: both)
 #
 # SAFETY INVARIANT: the ONLY mutations to real refs are
-#   `git branch -f angular` / `git branch -f react`  (+ optional `git tag -f <fw>-vX.Y.Z`).
+#   `git branch -f angular` / `git branch -f react`  (+ optional annotated tag <fw>-vX.Y.Z).
+# A version tag, once it exists, is NEVER moved: identical content re-uses it and
+# different content is refused (bump the version). Consumers pin these tags and a
+# GitHub tag ruleset rejects a moved tag, so this script must never need to move one.
 # `main` is never touched. Everything else happens in disposable worktrees/stage
 # dirs under $TMPDIR — the caller's working tree is never modified.
 set -euo pipefail
@@ -39,6 +42,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+  echo "ERROR: --version must be bare semver like 0.4.0 (got '$VERSION'); a 'v' prefix would mint the tag '<fw>-vv$VERSION'." >&2
+  exit 2
+fi
 ROOT_MANIFEST="$REPO_ROOT/scripts/curated-manifest-root.txt"
 [[ -f "$ROOT_MANIFEST" ]] || { echo "ERROR: root manifest not found: $ROOT_MANIFEST" >&2; exit 1; }
 
@@ -146,21 +153,63 @@ publish_framework() {
     commit -q -m "release($fw): s4-auth-${fw} ${VERSION:-unversioned}"
   NEW_SHA="$(git -C "$WORKTREE" rev-parse HEAD)"
 
-  # ONLY real-ref mutations in this script:
-  git -C "$REPO_ROOT" branch -f "$fw" "$NEW_SHA"
+  # Decide, do not mutate. The single write pass below runs only once EVERY framework has
+  # staged cleanly, so a refusal on the second framework cannot leave the first already
+  # re-pointed (the previous shape did exactly that).
+  STAGED_SHA[$fw]="$NEW_SHA"
   if [[ -n "$VERSION" ]]; then
-    git -C "$REPO_ROOT" tag -f "${fw}-v${VERSION}" "$NEW_SHA" >/dev/null
-    echo "[$fw] published branch '$fw' + tag '${fw}-v${VERSION}' @ ${NEW_SHA:0:12}"
+    local TAG="${fw}-v${VERSION}" EXISTING
+    if EXISTING="$(git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/${TAG}^{commit}" 2>/dev/null)"; then
+      if [[ "$(git -C "$REPO_ROOT" rev-parse "${EXISTING}^{tree}")" == "$(git -C "$REPO_ROOT" rev-parse "${NEW_SHA}^{tree}")" ]]; then
+        DECISION[$fw]="reuse:$EXISTING"
+      else
+        echo "ERROR: [$fw] '$TAG' is already published with different content (tag tree $(git -C "$REPO_ROOT" rev-parse --short "${EXISTING}^{tree}") vs staged $(git -C "$REPO_ROOT" rev-parse --short "${NEW_SHA}^{tree}")). A version is immutable once published — bump the version. No refs were changed." >&2
+        exit 1
+      fi
+    else
+      DECISION[$fw]="tag"
+    fi
   else
-    echo "[$fw] published branch '$fw' @ ${NEW_SHA:0:12} (no tag — pass --version to cut one)"
+    DECISION[$fw]="branch"
   fi
 }
 
+# ONLY real-ref mutations in this script. Two consumers depend on a version tag never
+# moving: apps whose lockfile resolved the tag to a commit, and the tag ruleset that
+# rejects a non-fast-forward tag update. So an existing tag is re-used (same tree) or the
+# whole release was refused above (different tree) — this function never sees that case.
+apply_framework() {
+  local fw="$1" NEW_SHA="${STAGED_SHA[$fw]}" TAG="${fw}-v${VERSION}"
+  case "${DECISION[$fw]}" in
+    reuse:*)
+      local EXISTING="${DECISION[$fw]#reuse:}"
+      git -C "$REPO_ROOT" branch -f "$fw" "$EXISTING"
+      echo "[$fw] '$TAG' already published with identical content @ ${EXISTING:0:12} — tag untouched, branch '$fw' re-pointed at it" ;;
+    tag)
+      git -C "$REPO_ROOT" branch -f "$fw" "$NEW_SHA"
+      git -C "$REPO_ROOT" -c user.name="s4-auth-export" -c user.email="export@s4-auth.local" \
+        tag -a "$TAG" "$NEW_SHA" -m "s4-auth-${fw} ${VERSION}" >/dev/null
+      echo "[$fw] published branch '$fw' + tag '$TAG' @ ${NEW_SHA:0:12}" ;;
+    branch)
+      git -C "$REPO_ROOT" branch -f "$fw" "$NEW_SHA"
+      echo "[$fw] published branch '$fw' @ ${NEW_SHA:0:12} (no tag — pass --version to cut one)" ;;
+  esac
+}
+
+# Two overlapping releases would race the tag check against the tag write; serialise them.
+exec 9>"$REPO_ROOT/.git/s4-auth-export.lock"
+flock 9 || { echo "ERROR: could not take the export lock" >&2; exit 1; }
+declare -A STAGED_SHA=() DECISION=()
 for fw in "${FRAMEWORKS[@]}"; do
-  publish_framework "$fw"
+  publish_framework "$fw"   # stage + decide; mutates nothing
+done
+for fw in "${FRAMEWORKS[@]}"; do
+  apply_framework "$fw"     # the only ref writes, after every framework passed
 done
 
 echo ""
 echo "Done. Distribution branches updated: ${FRAMEWORKS[*]}"
 echo "Push branches:  git push --force-with-lease <remote> ${FRAMEWORKS[*]}"
-[[ -n "$VERSION" ]] && echo "Push tags:      git push <remote> $(printf '%s-v'"$VERSION"' ' "${FRAMEWORKS[@]}")"
+if [[ -n "$VERSION" ]]; then
+  echo "Push tags:      git push <remote> $(printf '%s-v'"$VERSION"' ' "${FRAMEWORKS[@]}")"
+fi

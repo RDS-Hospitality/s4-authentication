@@ -21,20 +21,34 @@
  * idiom — this is mechanism, not contract, so it does not move when a stack is
  * added.
  */
+import { HTTP_INTERCEPTORS } from '@angular/common/http';
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { Amplify } from 'aws-amplify';
+import { cognitoUserPoolsTokenProvider } from 'aws-amplify/auth/cognito';
+import { defaultStorage } from 'aws-amplify/utils';
 
 import { authConfig, buildAmplifyConfig } from '../auth.config';
+import { GraphqlAuthInterceptor } from './graphql-auth';
 
 /**
  * Configures the Amplify v6 client from `auth.config.ts` (the single per-app
  * config surface) and returns Angular EnvironmentProviders for the root config.
  *
- * The auth services are `providedIn: 'root'`, so no providers are registered
- * today; returning EnvironmentProviders keeps the bootstrap call-site stable if
- * DI registrations are added later (e.g. an auth HTTP interceptor).
+ * Registers the C9 bearer interceptor as a class interceptor. That reaches every
+ * app whose HttpClient comes from `HttpClientModule` or from
+ * `provideHttpClient(withInterceptorsFromDi())`. A standalone app that calls a bare
+ * `provideHttpClient()` ignores class interceptors by design, so the installer adds
+ * `withInterceptors([graphqlAuthInterceptor])` there instead — both paths run the
+ * same code, and a request is only ever decorated once per interceptor.
  */
 export function provideAuth(): EnvironmentProviders {
   Amplify.configure(buildAmplifyConfig(authConfig));
-  return makeEnvironmentProviders([]);
+  // C2 — token storage = localStorage (the fleet default: persistent, multi-tab session
+  // that survives reload). This is Amplify v6's default; set explicitly so the C2 choice
+  // is auditable in code rather than an inherited library default. `sessionStorage` (from
+  // aws-amplify/utils) is the acceptable alternative for a tab-scoped session.
+  cognitoUserPoolsTokenProvider.setKeyValueStorage(defaultStorage);
+  return makeEnvironmentProviders([
+    { provide: HTTP_INTERCEPTORS, useClass: GraphqlAuthInterceptor, multi: true },
+  ]);
 }

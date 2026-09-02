@@ -45,6 +45,9 @@ Copy these files from `schematics/ng-add/files/src/app/` into the project's
 | `auth/auth.service.ts.template`    | `auth/auth.service.ts` |
 | `auth/auth.guard.ts.template`      | `auth/auth.guard.ts` |
 | `auth/role.guard.ts.template`      | `auth/role.guard.ts` |
+| `auth/graphql-auth.ts.template`    | `auth/graphql-auth.ts` |
+| `auth/roles.ts.template`           | `auth/roles.ts` |
+| `auth/url-allowlist.ts.template`   | `auth/url-allowlist.ts` |
 | `login/login.component.ts.template`    | `login/login.component.ts` |
 | `login/callback.component.ts.template` | `login/callback.component.ts` |
 
@@ -64,15 +67,17 @@ substitutes these tokens; by hand, replace each `<%= … %>` with the matching v
 | `<%= cognitoDomain %>`| hosted domain, **no scheme** (e.g. `<prefix>.auth.us-east-1.amazoncognito.com`) | CFN Output `CognitoDomain` |
 | `[<%= providersLiteral %>]` | the enabled IdPs as a quoted list, e.g. `['google']` or `['google', 'microsoft']` (C8) | product decision |
 | `'<%= appTitle %>'`   | login-card heading, or `'Sign in'` to keep the default | product decision |
+| `'<%= postLoginRoute %>'` | the route to land on after login, e.g. `'/'` (C6; must start with `/`) | product decision |
 
 No pool yet? See the greenfield section in the [`README`](../README.md)
 (`infra/cognito/`) — deploy the template, then read the three values from its
 `Outputs`.
 
-The other values in `auth.config.ts` (`scopes`, `postLoginRoute`, `session.*`)
-are **policy bound to `STANDARD.md`**, not per-deploy settings — change them only
-deliberately (e.g. opt into the admin scope per C8, or set the landing route per
-C6). They are not placeholders.
+The other values in `auth.config.ts` (`scopes`, `session.*`) are **policy bound to
+`STANDARD.md`**, not per-deploy settings — change them only deliberately (e.g. opt
+into the admin scope per C8). `graphqlUrls` (C9) is per deployment: the data-API
+endpoints that receive the user's token — leave it `[]` until the migration gate in
+`docs/MIGRATE-0.3-TO-0.4.md` passes.
 
 ## 4. Register `provideAuth()` at bootstrap
 
@@ -131,10 +136,25 @@ import { authGuard } from './auth/auth.guard';
 { path: '', canActivate: [authGuard], children: [ /* …protected routes… */ ] },
 ```
 
-For coarse role gating on a Cognito group, `roleGuard('group-name')` is provided
-(`auth/role.guard.ts`) — note it is route-level only; per-user data-layer
-authorization is out of scope (see `STANDARD.md`, "What is *not* in this
-contract").
+For role gating, `roleGuard('role-name')` (`auth/role.guard.ts`) tests the
+`hasura_allowed_roles` claim on the ID token; on the root protected route it is the
+app-wide floor. It gates the UI only — the data layer enforces the same claims (C9).
+
+## Then: send the token to your GraphQL API (C9)
+
+`provideAuth()` registers a class interceptor that `HttpClientModule` and
+`provideHttpClient(withInterceptorsFromDi())` honour. A standalone app with a bare
+`provideHttpClient()` must add the functional form itself:
+
+```ts
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { graphqlAuthInterceptor } from './auth/graphql-auth';
+
+provideHttpClient(withInterceptors([graphqlAuthInterceptor])),
+```
+
+Set `graphqlUrls` in `auth.config.ts`; the header is attached only to those endpoints.
+For a GraphQL WebSocket use `graphqlConnectionParams` from the same module.
 
 ## Verify
 

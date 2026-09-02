@@ -127,6 +127,26 @@ Each check cites its clause. Checks are typed:
 
 ---
 
+## C9 — Data-layer credential is the user's token
+
+- [ ] **C9.1** 🔍 No data-layer admin secret or role-asserting header in shipped
+      source, environment or build config. Scope to source and build output and
+      **exclude `docs/` and Markdown** — the migration guide names these strings
+      as prose (see "Known limitation of the 🔍 greps").
+      `grep -rEni --include='*.ts' --include='*.tsx' --include='*.js' --include='*.yml' --include='*.json' 'x-hasura-admin-secret|admin[_-]?secret|x-hasura-role' <repo>/src <repo>/dist <repo>/amplify.yml` → 0.
+- [ ] **C9.2** ⚙️ `graphqlUrls` is non-empty and, where the data host also serves
+      other content, path-scoped (`/hasura-api`, not a bare origin).
+- [ ] **C9.3** 👁 Network tab: every request to an endpoint in `graphqlUrls` carries
+      `Authorization: Bearer …`; a request to any other host carries none.
+- [ ] **C9.4** 👁 Signed in with an app client the deployment has not minted a role
+      claim for, the console shows the adapter's "claims-emission set" diagnostic
+      once; with a minted claim it shows nothing.
+- [ ] **C9.5** ⚙️ The app's Cognito client is in the claims-emission set of its pool
+      (or the deployment's default role for a claim-less token is the one the app
+      was sized for) BEFORE the admin secret is removed — the adoption guide's gate.
+
+---
+
 ## Scoring
 
 ### Known limitation of the 🔍 greps

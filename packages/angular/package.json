@@ -2,15 +2,24 @@
   "name": "s4-auth-angular",
   "version": "0.1.0",
   "description": "S4 standardized Angular 17 + Amplify v6 auth, installed via ng add.",
-  "keywords": ["ng-add", "schematics", "angular", "auth", "cognito"],
+  "keywords": [
+    "ng-add",
+    "schematics",
+    "angular",
+    "auth",
+    "cognito"
+  ],
   "license": "UNLICENSED",
   "private": true,
   "schematics": "./schematics/collection.json",
-  "ng-add": { "save": "dependencies" },
+  "ng-add": {
+    "save": "dependencies"
+  },
   "files": [
     "schematics/collection.json",
     "schematics/ng-add/index.js",
     "schematics/ng-add/add-routes.js",
+    "schematics/ng-add/add-http-client.js",
     "schematics/ng-add/schema.json",
     "schematics/ng-add/files"
   ],

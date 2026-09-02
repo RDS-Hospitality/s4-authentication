@@ -106,13 +106,24 @@ run_and_check() {
     || { echo "FAIL: react README.md is not the React framework README"; exit 1; }
   check_no_leaks react
 
-  # --- release tags point at the branch tips ---
+  # --- release tags point at the branch tips, and are ANNOTATED (a tag object) ---
   for fw in angular react; do
     git rev-parse --verify "${fw}-v${VER}" >/dev/null 2>&1 \
       || { echo "FAIL: tag ${fw}-v${VER} not created"; exit 1; }
     [[ "$(git rev-parse "${fw}-v${VER}^{commit}")" == "$(git rev-parse "$fw")" ]] \
       || { echo "FAIL: tag ${fw}-v${VER} does not point at branch '$fw' tip"; exit 1; }
+    [[ "$(git cat-file -t "${fw}-v${VER}")" == "tag" ]] \
+      || { echo "FAIL: tag ${fw}-v${VER} is lightweight; releases must be annotated"; exit 1; }
   done
+
+  # --- the exported Angular schematic LOADS: every module the manifest ships must resolve.
+  #     (npm pack in the smoke script uses package.json `files`, not the manifest, so only
+  #     this check catches a module the manifest forgot.)
+  local EXTRACT; EXTRACT="$(mktemp -d)"
+  git archive angular | tar -x -C "$EXTRACT"
+  NODE_PATH="$PWD/packages/angular/node_modules" node -e "require('$EXTRACT/schematics/ng-add/index.js')" \
+    || { echo "FAIL: exported schematics/ng-add/index.js does not load from the angular branch tree"; exit 1; }
+  rm -rf "$EXTRACT"
 
   # --- main is NOT touched by the orchestrator (trunk is sacred here) ---
   # (main may not exist in the scratch clone's local refs; if it does, it must be unchanged.
@@ -123,7 +134,36 @@ run_and_check() {
 }
 
 run_and_check          # first release
+TAG_A1="$(git rev-parse "angular-v${VER}")"; TAG_R1="$(git rev-parse "react-v${VER}")"
 run_and_check          # SECOND run must also succeed (re-runnability)
+BR_A2="$(git rev-parse angular)"
+# Identical content under the same version must NOT mint a new tag object: consumers pin
+# the tag, and a tag-protection ruleset rejects a moved tag as a non-fast-forward update.
+[[ "$(git rev-parse "angular-v${VER}")" == "$TAG_A1" && "$(git rev-parse "react-v${VER}")" == "$TAG_R1" ]] \
+  || { echo "FAIL: re-running an identical release moved a version tag (${TAG_A1:0:12} -> $(git rev-parse "angular-v${VER}" | cut -c1-12))"; exit 1; }
+
+# --- DIFFERENT content under an EXISTING version must be refused. This is the failure the
+#     ledger recorded: twelve files shipped under an unchanged 0.3.1.
+cp packages/react/README-main.md "$SCRATCH/README-main.bak"
+printf '\n<!-- mutated by test-export-main.sh -->\n' >> packages/react/README-main.md
+if bash scripts/export-main.sh --version "$VER" > "$SCRATCH/refusal.out" 2>&1; then
+  echo "FAIL: export republished different content under existing tag react-v${VER}"; exit 1
+fi
+grep -q "already published with different content" "$SCRATCH/refusal.out" \
+  || { echo "FAIL: refusal did not name the cause"; cat "$SCRATCH/refusal.out"; exit 1; }
+[[ "$(git rev-parse "react-v${VER}")" == "$TAG_R1" ]] \
+  || { echo "FAIL: refused release still moved react-v${VER}"; exit 1; }
+[[ "$(git rev-parse angular)" == "$BR_A2" ]] \
+  || { echo "FAIL: a refusal on react left the angular branch re-pointed (refs must change all-or-nothing)"; exit 1; }
+cp "$SCRATCH/README-main.bak" packages/react/README-main.md
+echo "  refusal check OK (changed content under an existing version is rejected, tag untouched)"
+
+# --- VERSION must be bare semver: a 'v' prefix would mint 'angular-vv0.2.0'.
+if bash scripts/export-main.sh --version "v${VER}" > "$SCRATCH/semver.out" 2>&1; then
+  echo "FAIL: export accepted a v-prefixed version"; exit 1
+fi
+grep -qi "semver" "$SCRATCH/semver.out" || { echo "FAIL: version rejection did not mention semver"; cat "$SCRATCH/semver.out"; exit 1; }
+echo "  version-format check OK"
 
 # After exercising the export twice, no temp worktrees/branches may dangle.
 [[ -z "$(git worktree list --porcelain | grep -iE 'export-(angular|react)' || true)" ]] \

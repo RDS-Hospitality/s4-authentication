@@ -11,6 +11,10 @@
  * Fails visibly: a sign-in error forwarded by CallbackPage (router state, see loginState.ts)
  * or thrown by signIn() itself is rendered above the provider buttons, never swallowed.
  *
+ * A `denied` marker (RequireRole turned a signed-in user away) suppresses the C5
+ * auto-forward below — forwarding them would bounce straight back to the guard. Router
+ * state does not survive a reload, so a refreshed denial page shows the plain card.
+ *
  * Ships the standardized branded card (`auth.css`) — gradient page, white card, inlined
  * provider marks — matching angular-amplify-v6/login so both adapters present the SAME
  * login across the fleet. A consumer MAY restyle with its own design system, but the
@@ -54,17 +58,20 @@ const PROVIDER_LOGO: Record<Provider, ReactElement> = {
 export function LoginPage() {
   const { isAuthenticated, isLoading, signIn } = useAuthService();
   const location = useLocation();
-  const { returnUrl, error: forwardedError } = readLoginState(location.state);
-  // Seeded from the forwarded error; cleared on the next attempt, replaced if that throws.
-  const [error, setError] = useState<string | undefined>(forwardedError);
+  const { returnUrl, error: forwardedError, denied } = readLoginState(location.state);
+  // Seeded from the forwarded error or denial; cleared on the next attempt, replaced if that throws.
+  const [error, setError] = useState<string | undefined>(
+    forwardedError ??
+      (denied ? 'Your account has not been granted access to this application.' : undefined),
+  );
 
   if (isLoading) {
     return <div className="auth-login__status">Checking authentication…</div>;
   }
 
   // C5 (login idempotence) — authenticated visit forwards without re-initiating auth,
-  // replacing the login history entry.
-  if (isAuthenticated) {
+  // replacing the login history entry. NOT when a role gate sent them here (loop).
+  if (isAuthenticated && !denied) {
     const target = resolvePostLoginTarget(undefined, location.state);
     return <Navigate to={target} replace />;
   }

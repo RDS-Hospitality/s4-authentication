@@ -14,6 +14,7 @@ import { strings, normalize } from '@angular-devkit/core';
 import { readWorkspace, addRootProvider, addDependency } from '@schematics/angular/utility';
 import { Schema } from './schema';
 import { addAuthRoutes } from './add-routes';
+import { addHttpClientInterceptor } from './add-http-client';
 
 /** Turn the comma-separated `providers` option into a quoted TS array literal body. */
 function toProvidersLiteral(providers: string): string {
@@ -45,6 +46,7 @@ export function ngAdd(options: Schema): Rule {
         cognitoDomain: options.cognitoDomain,
         providersLiteral: toProvidersLiteral(providers),
         appTitle: options.appTitle ?? 'Sign in',
+        postLoginRoute: options.postLoginRoute ?? '/',
       }),
       // project.root ('projects/demo'), not project.sourceRoot ('projects/demo/src'):
       // the template files already live under 'src/app/…', so moving to sourceRoot
@@ -55,6 +57,10 @@ export function ngAdd(options: Schema): Rule {
     const routesPath = [
       normalize(`${project.root}/src/app/app.routes.ts`),
       normalize(`${project.root}/src/app/app-routing.module.ts`),
+    ].find((p) => tree.exists(p));
+    const providerHostPath = [
+      normalize(`${project.root}/src/app/app.config.ts`),
+      normalize(`${project.root}/src/app/app.module.ts`),
     ].find((p) => tree.exists(p));
     return chain([
       // Amplify v6 baseline: the scaffolded files use v6 APIs throughout. ^6.17.0 =
@@ -83,6 +89,18 @@ export function ngAdd(options: Schema): Rule {
         );
       },
       addAuthRoutes(routesPath),
+      // C9 — a standalone app's bare provideHttpClient() ignores the class interceptor
+      // provide-auth registers; wire the functional one into it (AST edit, see add-http-client.ts).
+      addHttpClientInterceptor(providerHostPath),
+      (hostTree: Tree) => {
+        context.logger.info(
+          's4-auth-angular: NEXT — (1) set graphqlUrls in src/app/auth.config.ts to the data-API ' +
+            'endpoints that should receive the user\'s token; (2) for an app-wide role floor put ' +
+            "roleGuard('<role>') on the root protected route; (3) before removing any admin secret, " +
+            'confirm this app client is in the pool\'s claims-emission set — docs/MIGRATE-0.3-TO-0.4.md step 0.',
+        );
+        return hostTree;
+      },
     ]);
   };
 }

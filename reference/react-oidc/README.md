@@ -17,10 +17,13 @@ behavior was validated when apps adopted it (see "Runtime-verified").
 | `auth/useAuthService.ts` | signIn (C1/C8), logout (C4), token getters (C2) |
 | `auth/useIdleTimeout.ts` | C3 idle timeout |
 | `auth/RequireAuth.tsx` | C7 fail-closed guard, C6 returnUrl |
-| `auth/RequireRole.tsx` | claim-based authz on verified token |
+| `auth/RequireRole.tsx` | C9 role gate on the verified ID token's `hasura_allowed_roles`; denies to `/login` with `denied: 'role'` |
 | `login/LoginPage.tsx` | C8 provider-from-config card; renders a forwarded or thrown sign-in error |
 | `login/CallbackPage.tsx` | C5 callback history replacement, C6 landing; forwards a failed exchange to `/login` |
-| `login/loginState.ts` | Typed router-state contract (`returnUrl`, `error`) shared by RequireAuth, CallbackPage and LoginPage |
+| `login/loginState.ts` | Typed router-state contract (`returnUrl`, `error`, `denied`) shared by RequireAuth, RequireRole, CallbackPage and LoginPage |
+| `auth/graphqlAuth.ts` | C9 bearer helpers: `graphqlAuthHeaders`, `authFetch`, `graphqlConnectionParams` — non-hook, share the provider's `UserManager` |
+| `auth/roles.ts` | C9 role claims: `readRoles`, `readDefaultRole`, `hasAnyRole`, `warnIfNoRoleClaim` — byte-identical to the Angular adapter's `auth/roles.ts` |
+| `auth/urlAllowlist.ts` | C9 `matchesGraphqlUrl` — the token goes only to `graphqlUrls`; byte-identical to the Angular adapter's `auth/url-allowlist.ts` |
 | `auth.css` | Standardized branded login card (gradient page, card, inlined provider marks) — matches the Angular adapter |
 
 ## Clause coverage
@@ -35,6 +38,7 @@ behavior was validated when apps adopted it (see "Runtime-verified").
 | C6 post-login route | `resolvePostLoginTarget` + returnUrl in OAuth `state` |
 | C7 fail-closed guards | `RequireAuth` (no kill-switch) |
 | C8 providers/scopes | config-driven `scope` + per-provider `identity_provider` |
+| C9 data-layer credential | `authFetch` / `graphqlAuthHeaders` attach the ID token only to `authConfig.graphqlUrls`; `RequireRole` reads `hasura_allowed_roles`; `warnIfNoRoleClaim` when the claim is missing |
 
 ## Configure
 `auth.config.ts` needs four deploy-specific values from your Cognito stack's CFN
@@ -337,6 +341,50 @@ reset those atoms — an easy gap to miss.)*
   working, not a failed logout (STANDARD.md C4 Bounds). To force a fresh credential
   prompt on a shared terminal where multiple people each sign in, initiate sign-in
   with `extraQueryParams: { prompt: 'login' }` — the standard OIDC remedy.
+
+## Wire GraphQL (C9)
+
+**Before you start:** the app's Cognito client must be in the pool's **claims-emission
+set** (the PreTokenGeneration Lambda mints `hasura_*` role claims per client) — see the
+root `docs/MIGRATE-0.3-TO-0.4.md` gate. A token without the claim is still sent; the
+data layer then applies its own default role and the adapter logs
+`s4-auth: the signed-in user's token carries no "hasura_allowed_roles" claim …` once.
+
+1. Set `graphqlUrls` in `auth.config.ts` — absolute origins or a same-origin proxy
+   prefix, e.g. `['https://api.s4hospitality.net', '/hasura-api']`. Path-scope entries
+   when the host also serves other content.
+2. Attach the header where your client lives (all three read the same `UserManager`
+   the `<AuthProvider>` drives, so they see the same session and silent renewals):
+   ```ts
+   // Apollo (HTTP)
+   import { setContext } from '@apollo/client/link/context';
+   import { graphqlAuthHeaders } from './auth/graphqlAuth';
+   const authLink = setContext(async (_, { headers }) => ({ headers: { ...headers, ...(await graphqlAuthHeaders()) } }));
+
+   // graphql-ws (subscriptions)
+   import { createClient } from 'graphql-ws';
+   import { graphqlConnectionParams } from './auth/graphqlAuth';
+   const wsClient = createClient({ url, connectionParams: graphqlConnectionParams });
+
+   // plain fetch
+   import { authFetch } from './auth/graphqlAuth';
+   const res = await authFetch('https://api.s4hospitality.net/v1/graphql', { method: 'POST', body });
+   ```
+   `authFetch` attaches the header only for URLs in `graphqlUrls`; the Apollo and
+   graphql-ws helpers trust you to point them at a data API.
+3. Roles. `useAuthService()` exposes `roles` and `role` (display). To gate routes,
+   wrap the root protected layout in `<RequireRole anyOf={['dashboard_readonly']}>` for
+   an app-wide floor, or a child route for a finer gate. It always denies to `/login`
+   with `denied: 'role'`; `LoginPage` shows the denial and does not auto-forward. A
+   pool with no role Lambda mints no claim, so `RequireRole` denies everyone there —
+   use it only behind pools that mint roles.
+4. **Logout and WebSockets:** `connectionParams` is re-evaluated only on reconnect.
+   Dispose your GraphQL WebSocket client in the same place you call `logout()`.
+
+Status: no React consumer runs this path against a live pool yet — it is verified by
+typecheck and the CLI's vitest suite (`url-allowlist`, `roles`, `graphql-auth`). The
+Angular sibling is proven in production (culvers dashboard, 2026-08-28). Router state
+(`denied`) does not survive a reload; a refreshed denial page shows the plain card.
 
 ## Runtime-verified (PoC 2026-06-17, test pool `us-east-1_Hzo7R6XQY`)
 The former verified-pending items are now closed against a live pool:

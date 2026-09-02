@@ -1,46 +1,61 @@
 /**
  * RequireRole.tsx — React + react-oidc-context adapter
  *
- * Role/claim guard analog of angular-amplify-v6/auth/role.guard.ts. Composes ON TOP of
- * RequireAuth (authentication first, authorization second). The role decision is made
- * from the VERIFIED id_token claims exposed by the library (auth.user.profile), never a
- * hand-decoded token (C2). Fail-closed (C7): a missing/again-unknown claim denies.
+ * Route-level role gate over the roles minted on the user's ID token (STANDARD.md C9
+ * `roleClaim`, fleet default `hasura_allowed_roles`). Composes ON TOP of RequireAuth
+ * (authentication first, authorization second). Reads the VERIFIED id_token claims the
+ * library exposes (auth.user.profile), never a hand-decoded token (C2). Fail-closed (C7).
+ * Analog of angular-amplify-v6/auth/role.guard.ts.
  *
- * Cognito surfaces group membership on the `cognito:groups` claim. Wire as:
- *   <RequireAuth><RequireRole anyOf={['admin']}><AdminLayout/></RequireRole></RequireAuth>
+ * PLACEMENT. Wrapping the root protected layout makes it the app-wide floor ("only users
+ * the pool minted a role for may use this app"); wrapping a child route makes it a finer
+ * gate. A signed-in user without the role is sent to /login with `denied: 'role'` — never
+ * to postLoginRoute, which may itself sit under this wrapper and would loop. LoginPage
+ * suppresses its auto-forward when `denied` is present.
+ *
+ * WHAT CHANGED IN 0.4.0 (audit existing call sites): this used to read the Cognito
+ * group-membership claim. `anyOf` names data-layer roles now.
+ *
+ * A pool with no role Lambda mints no claim, so this denies everyone there; use it only
+ * behind pools that mint roles. warnIfNoRoleClaim names the cause in the console.
+ *
+ *   <RequireAuth><RequireRole anyOf={['dashboard_readonly']}><AppLayout/></RequireRole></RequireAuth>
  */
 import React from 'react';
 import { Navigate } from 'react-router';
 import { useAuth } from 'react-oidc-context';
 
-import { authConfig } from '../auth.config';
+import type { LoginLocationState } from '../login/loginState';
+import { hasAnyRole, readRoles, warnIfNoRoleClaim } from './roles';
 
 export function RequireRole({
   anyOf,
   children,
 }: {
-  anyOf: string[];
+  anyOf: string | string[];
   children: React.ReactNode;
 }) {
   const auth = useAuth();
+  // Throws on an empty requirement — an empty gate would silently lock everyone out.
+  const wanted = Array.isArray(anyOf) ? anyOf : [anyOf];
+  if (wanted.filter((r) => r.trim().length > 0).length === 0) {
+    throw new Error('RequireRole: anyOf must be non-empty');
+  }
 
   // C7 — still resolving is not "allow".
   if (auth.isLoading) {
     return null;
   }
-
-  // C2 — read groups from the verified id_token claims, not a decode.
-  const claim = auth.user?.profile['cognito:groups'];
-  const groups: string[] = Array.isArray(claim) ? claim.map(String) : [];
-  const allowed = anyOf.some((role) => groups.includes(role));
-
-  // C7 — fail closed: unauthenticated OR lacking the role denies. Send to the configured
-  // landing (not login) when authenticated-but-unauthorized, to avoid a redirect loop.
+  // C7 — unauthenticated denies to login (RequireAuth normally catches this first).
   if (!auth.isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
-  if (!allowed) {
-    return <Navigate to={authConfig.postLoginRoute} replace />;
+  const roles = readRoles(auth.user?.profile);
+  if (hasAnyRole(roles, wanted)) {
+    return <>{children}</>;
   }
-  return <>{children}</>;
+  // Diagnose a claim-less pool here too, before any GraphQL request has fired.
+  warnIfNoRoleClaim(auth.user?.profile);
+  const state: LoginLocationState = { denied: 'role' };
+  return <Navigate to="/login" replace state={state} />;
 }

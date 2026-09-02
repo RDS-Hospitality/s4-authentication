@@ -16,6 +16,12 @@
  * The Output -> config mapping is called out per field. At deploy time these are
  * injected (env substitution / Angular environment file / runtime config fetch);
  * the placeholders below are the ONLY things that are deploy-time-specific.
+ *
+ * DATA-LAYER PRECONDITION (C9): before `graphqlUrls` is set and an admin secret is
+ * removed, this app's Cognito client must be in the pool's claims-emission set (the
+ * PreTokenGeneration Lambda mints the role claims per client). A token without a role
+ * claim is still sent — the data layer then applies its own default role — and the
+ * adapter logs a console error naming the cause. See docs/MIGRATE-0.3-TO-0.4.md.
  */
 
 /** The set of IdPs this adapter knows how to render + initiate (C8). */
@@ -48,6 +54,17 @@ export const AMPLIFY_PROVIDER: Record<Provider, 'Google' | { custom: string }> =
 export interface AuthConfig {
   /** Vocab `providers` — enabled IdPs. Drives C8. Login renders only these. */
   providers: Provider[];
+
+  /**
+   * Vocab `graphqlUrls` — data-API endpoints that receive the user's bearer token.
+   * Drives C9. Each entry is an absolute origin (`https://api.example.com`, optionally
+   * with a path) or a same-origin path prefix (`/hasura-api`, e.g. a dev-server proxy).
+   * A request matches only at a segment boundary, so `/hasura-api` never matches
+   * `/hasura-apiv2`. Prefer path-scoped entries when the host also serves other
+   * content: a bare origin sends the token on EVERY request to that origin. Empty
+   * (the default) attaches nothing — the interceptor is a no-op.
+   */
+  graphqlUrls: string[];
 
   /**
    * Optional login-card heading ("Dashboard Login", "Acme Reports", …).
@@ -116,6 +133,10 @@ export const authConfig: AuthConfig = {
   // Set to ['google','microsoft'] for both, ['microsoft'] for MS-only, etc.
   providers: ['google'],
 
+  // C9 — data-API endpoints that receive the bearer token. Set per deployment,
+  // e.g. ['https://api.s4hospitality.net', '/hasura-api']. Empty = no-op.
+  graphqlUrls: [],
+
   // Presentation — login-card heading. Omit to get the "Sign in" default.
   appTitle: 'Sign in',
 
@@ -127,8 +148,8 @@ export const authConfig: AuthConfig = {
   // calls Cognito user APIs client-side (opt-in).
   scopes: ['openid', 'email', 'profile'],
 
-  // C6 — single configurable landing route.
-  postLoginRoute: '/home',
+  // C6 — single configurable landing route (installer option `postLoginRoute`).
+  postLoginRoute: '/',
 
   session: {
     accessTtl: 60 * MIN, // C3: 60 min

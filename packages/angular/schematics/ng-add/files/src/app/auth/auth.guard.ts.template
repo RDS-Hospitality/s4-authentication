@@ -23,39 +23,17 @@ import {
 import { authConfig } from '../auth.config';
 import { AuthService } from './auth.service';
 
-/** Secure-by-default fallback when a config omits `allowedEmailDomains`. */
-const DEFAULT_ALLOWED_DOMAINS = ['rdspos.com'];
-
-/**
- * Pure email-domain gate for `authConfig.allowedEmailDomains`. Case-insensitive;
- * `'*'` in the list admits any account; a missing/malformed email or an empty
- * list => denied (fail-closed). Exported for unit testing. When the role solution
- * arrives, this is the seam it replaces — swap the domain test for a role lookup.
- */
-export function emailDomainAllowed(
-  email: string | null | undefined,
-  allowed: readonly string[] | undefined,
-): boolean {
-  if (!email) return false;
-  const at = email.lastIndexOf('@');
-  if (at < 0 || at === email.length - 1) return false;
-  const domain = email.slice(at + 1).toLowerCase();
-  const list = (allowed ?? []).map((d) => d.trim().toLowerCase()).filter(Boolean);
-  if (list.includes('*')) return true;
-  return list.includes(domain);
-}
-
 /**
  * Realizes STANDARD.md C7 — fail-closed authentication guard, applied by default
  * to every protected route. Realizes STANDARD.md C6 — on denial, captures the
  * attempted URL as `returnUrl` so the user is returned there after login.
  *
  * NOTE (C7): there is intentionally no escape hatch — no query param, env flag,
- * or kill-switch grants access. The ONLY "allow" path is a verified session
- * WHOSE email domain is permitted by `authConfig.allowedEmailDomains`
- * (secure-by-default: `rdspos.com` only). Domain-denied users are bounced to
- * `/login?denied=domain`; LoginComponent suppresses its auto-redirect on that
- * param, so there is no guard<->login loop.
+ * or kill-switch grants access. The ONLY "allow" path is a verified session.
+ * Who may sign in at all is decided at the identity provider (the pool's
+ * inbound-federation gate), not here; what a signed-in user may do is decided by
+ * the data layer from the token's role claims (C9) and, for route-level gating,
+ * by `roleGuard` — this guard answers only "is there a verified session".
  */
 export const authGuard: CanActivateFn = async (
   _route: ActivatedRouteSnapshot,
@@ -66,18 +44,8 @@ export const authGuard: CanActivateFn = async (
 
   try {
     // Truth comes from a SDK/JWKS-verified session (C2), not a local flag.
-    const ok = await auth.isAuthenticated();
-    if (ok) {
-      // A verified session is necessary but not sufficient: the email domain must
-      // be permitted (secure-by-default = rdspos.com only). Fail-closed on null.
-      const email = await auth.getEmail();
-      if (emailDomainAllowed(email, authConfig.allowedEmailDomains ?? DEFAULT_ALLOWED_DOMAINS)) {
-        return true;
-      }
-      // Authenticated but domain not permitted — bounce with a denial reason.
-      return router.createUrlTree(['/login'], {
-        queryParams: { denied: 'domain' },
-      });
+    if (await auth.isAuthenticated()) {
+      return true;
     }
     // C6 — preserve the deep-linked protected URL as returnUrl.
     return router.createUrlTree(['/login'], {

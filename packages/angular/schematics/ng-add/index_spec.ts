@@ -18,9 +18,9 @@ const APP = '/projects/demo/src/app';
 describe('ng-add', () => {
   const runner = new SchematicTestRunner('s4-auth-angular', collectionPath);
 
-  async function run(): Promise<UnitTestTree> {
+  async function run(extra: Record<string, unknown> = {}): Promise<UnitTestTree> {
     const app = await createTestApp('demo');
-    return runner.runSchematic('ng-add', OPTIONS, app);
+    return runner.runSchematic('ng-add', { ...OPTIONS, ...extra }, app);
   }
 
   it('scaffolds the adapter source files into the project', async () => {
@@ -44,6 +44,38 @@ describe('ng-add', () => {
     expect(config).toContain("appTitle: 'Reports Login'");
     expect(config).not.toContain('__USER_POOL_ID__');
     expect(config).not.toContain('<%=');
+  });
+
+  it('scaffolds the C9 data-layer files and the shared pure modules', async () => {
+    const tree = await run();
+    expect(tree.files).toContain(`${APP}/auth/graphql-auth.ts`);
+    expect(tree.files).toContain(`${APP}/auth/roles.ts`);
+    expect(tree.files).toContain(`${APP}/auth/url-allowlist.ts`);
+    expect(tree.readContent(`${APP}/auth/roles.ts`)).toContain('hasura_allowed_roles');
+  });
+
+  it('fills postLoginRoute, defaulting to "/"', async () => {
+    const dflt = await run();
+    expect(dflt.readContent(`${APP}/auth.config.ts`)).toContain("postLoginRoute: '/'");
+    const custom = await run({ postLoginRoute: '/dashboard' });
+    expect(custom.readContent(`${APP}/auth.config.ts`)).toContain("postLoginRoute: '/dashboard'");
+  });
+
+  it('ships no email gate and no Cognito group check', async () => {
+    const tree = await run();
+    for (const file of tree.files.filter((f: string) => f.startsWith(APP))) {
+      expect(tree.readContent(file)).not.toContain('allowedEmailDomains');
+      expect(tree.readContent(file)).not.toContain('cognito:groups');
+    }
+  });
+
+  it('keeps the shared pure modules byte-identical to the React reference', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const T = path.join(__dirname, 'files/src/app/auth');
+    const R = path.join(__dirname, '../../../../reference/react-oidc/auth');
+    expect(fs.readFileSync(path.join(T, 'url-allowlist.ts.template'), 'utf8')).toBe(fs.readFileSync(path.join(R, 'urlAllowlist.ts'), 'utf8'));
+    expect(fs.readFileSync(path.join(T, 'roles.ts.template'), 'utf8')).toBe(fs.readFileSync(path.join(R, 'roles.ts'), 'utf8'));
   });
 
   it('wires provideAuth() into the app config', async () => {

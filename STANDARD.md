@@ -5,6 +5,11 @@
   API (no "Amplify", no "Angular", no `replaceUrl`, no `atob`-as-mechanism).
   State the *observable outcome* + a *mechanical conformance test*. The *how*
   belongs in a per-stack adapter.
+
+  The one place a downstream product's identifier may appear is as a DEFAULT
+  VALUE in the Config Vocabulary table (the fleet's role-claim names) — never
+  in a clause's Rule. A clause describes the credential and the claim; the
+  vocabulary binds the fleet's current names for them.
 -->
 
 # The Auth Contract (`STANDARD.md`)
@@ -15,7 +20,7 @@
 
 An application is **conformant** when every clause below holds, demonstrated by
 its conformance test. Each clause exists to fix a real divergence found across
-the S4 frontend repos. The eight clauses are numbered **C1–C8**; the `(C#)` tag
+the S4 frontend repos. The nine clauses are numbered **C1–C9**; the `(C#)` tag
 after each heading is that clause's stable identifier — used by conformance
 tests and by cross-references between clauses.
 
@@ -242,6 +247,41 @@ change.
 
 ---
 
+## Data-layer credential is the user's token (C9)
+
+**Rule.** Every request the app makes to a data API that authorizes per user
+(GraphQL or REST) carries the signed-in user's **verified token** as a bearer
+credential, and carries it **only** to the endpoints named by the `graphqlUrls`
+config item. No shared secret — admin key, service token, API key — is present
+in a client bundle, its environment, or its build configuration. Authorization
+is derived server-side from claims on the verified token (`roleClaim`,
+`defaultRoleClaim`); the client never asserts a role or identity by header.
+
+**Why.** Three production apps shipped the data layer's admin secret in their
+bundles, which handed every visitor the server's full authority and made the
+login flow decorative. Sending the user's token instead lets the data layer
+enforce per-user access and lets the client-side guards (C7) be what they are:
+UX, not security. Scoping the header to configured endpoints keeps the token
+out of third-party requests.
+
+**Bounds.** What the data layer *grants* a verified token — role permissions,
+its default role for a token that carries no role claim, its unauthorized role
+for a request with no credential — is deployment configuration outside this
+contract. An adapter MUST make a token that carries no role claim (the
+deployment did not mint one for this app client) visible at runtime, and the
+adoption guide MUST gate admin-secret removal on that check.
+
+**Conformance test.**
+- No client bundle, source tree, environment file, or build config contains a
+  data-layer admin secret or a role-asserting request header.
+- Every data-API request to an endpoint in `graphqlUrls` carries
+  `Authorization: Bearer <verified token>`; a request to any other endpoint
+  carries no token.
+- A token with no role claim produces a visible runtime diagnostic naming the
+  cause.
+
+---
+
 ## Config Vocabulary (machine-readable half of the port)
 
 These items are the **stack-agnostic configuration contract**. Each adapter
@@ -262,6 +302,9 @@ CFN `Outputs` (`infra/cognito/`).
 | `session.accessTtl` | Access/ID token TTL — **60 min** | C3 |
 | `session.refreshTtl` | Refresh token TTL — **1 d** default (raise per product only with a recorded reason) | C3 |
 | `session.idleTimeout` | Idle logout — **30 min** (client-side; no app-client field) | C3 |
+| `graphqlUrls` | Data-API endpoints that receive the bearer token — absolute origins or same-origin path prefixes; empty = none | C9 |
+| `roleClaim` | Claim holding the allowed roles — fleet default `hasura_allowed_roles`, read from the **ID token** | C9 |
+| `defaultRoleClaim` | Claim holding the default role — fleet default `hasura_default_role`, read from the **ID token** | C9 |
 
 > **Anti-drift rule.** Behavioral policy that code can't express lives in this
 > document; everything a value can express lives in the config vocabulary. The
@@ -273,11 +316,14 @@ CFN `Outputs` (`infra/cognito/`).
 
 ## What is *not* in this contract
 
-This contract governs **authentication** only. It does **not** enforce the
-following — these remain each consuming repo's responsibility:
+This contract governs **authentication** and **which credential the client
+sends** (C9). It does **not** enforce the following — these remain each
+deployment's responsibility:
 
-- Removing the Hasura admin secret from client bundles.
-- Per-user data-layer authorization (Hasura JWT mode).
+- What the data layer grants a verified token: role permissions, its default
+  role for a token without a role claim, its unauthorized role for a request
+  with no credential. C9 governs which credential is sent, not what it is
+  granted.
 - Untangling the legacy shared Cognito pool.
 
 ---

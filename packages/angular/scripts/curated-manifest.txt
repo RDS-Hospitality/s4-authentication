@@ -10,6 +10,7 @@ packages/angular/README-main.md                     -> README.md
 packages/angular/schematics/collection.json         -> schematics/collection.json
 packages/angular/schematics/ng-add/index.js         -> schematics/ng-add/index.js
 packages/angular/schematics/ng-add/add-routes.js    -> schematics/ng-add/add-routes.js
+packages/angular/schematics/ng-add/add-http-client.js -> schematics/ng-add/add-http-client.js
 packages/angular/schematics/ng-add/schema.json      -> schematics/ng-add/schema.json
 packages/angular/schematics/ng-add/files            -> schematics/ng-add/files
 packages/angular/schematics/MANUAL-INSTALL.md       -> schematics/MANUAL-INSTALL.md

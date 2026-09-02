@@ -23,7 +23,7 @@
  * redirect_uri, post_logout_redirect_uri, scope, automaticSilentRenew, userStore,
  * extraQueryParams) plus provider callbacks (onSigninCallback, onRemoveUser).
  */
-import { WebStorageStateStore } from 'oidc-client-ts';
+import { UserManager, WebStorageStateStore, type UserManagerSettings } from 'oidc-client-ts';
 import type { AuthProviderProps } from 'react-oidc-context';
 
 /** The set of IdPs this adapter knows how to render + initiate (C8). */
@@ -70,6 +70,17 @@ export interface AuthConfig {
   scopes: string[];
   /** Vocab `postLoginRoute` — single configurable post-login landing. Drives C6. */
   postLoginRoute: string;
+  /**
+   * Vocab `graphqlUrls` — data-API endpoints that receive the user's bearer token (C9).
+   * Absolute origins (optionally with a path) or same-origin path prefixes such as a
+   * dev-server proxy (`/hasura-api`). Matches only at a segment boundary. Prefer
+   * path-scoped entries when the host also serves other content — a bare origin sends
+   * the token on every request to it. Empty (default) attaches nothing.
+   *
+   * PRECONDITION: the app's Cognito client must be in the pool's claims-emission set
+   * before an admin secret is removed; see docs/MIGRATE-0.3-TO-0.4.md.
+   */
+  graphqlUrls: string[];
   /** Vocab `session.*` — lifetime knobs. Drives C3. */
   session: {
     /** Access/ID TTL. STANDARD.md C3 = 60 min. CFN: AccessTokenValidity/IdTokenValidity. */
@@ -109,7 +120,8 @@ export const authConfig: AuthConfig = {
   cognitoDomain: env.VITE_COGNITO_HOSTED_DOMAIN ?? '__COGNITO_HOSTED_DOMAIN__', // CFN Output: CognitoDomain
   region: env.VITE_AWS_REGION ?? '__AWS_REGION__',
   scopes: ['openid', 'email', 'profile'], // C8 baseline; admin scope opt-in
-  postLoginRoute: '/home', // C6 — single configurable landing
+  postLoginRoute: '/', // C6 — single configurable landing (installer option)
+  graphqlUrls: [], // C9 — e.g. ['https://api.s4hospitality.net', '/hasura-api']
   session: {
     // FLAG (2026-06-24): accessTtl/refreshTtl are DEAD config here — no runtime code
     // reads them. They're enforced by Cognito (infra/cognito/template.yaml:341-347:
@@ -166,32 +178,58 @@ export function cognitoLogoutUrl(config: AuthConfig = authConfig): string {
 }
 
 /**
- * Derive react-oidc-context `AuthProviderProps` from `authConfig`.
+ * OIDC client settings for oidc-client-ts (UserManagerSettings). Kept separate from the
+ * provider props because `onSigninCallback` is a provider callback, not a UserManager
+ * setting — passing one object as both loses the callback that scrubs ?code/?state (C5),
+ * and `AuthProviderProps` is not assignable to `UserManagerSettings` (TS2345).
  *
- * Realizes:
- *  - C1 — oidc-client-ts defaults to Authorization Code + PKCE(S256); the implicit
- *    grant (`response_type` of `token`) is NEVER selected. We do not set response_type to
- *    anything but the default 'code'.
- *  - C2 — `userStore` is `localStorage` (the fleet default: persistent, multi-tab
- *    session, survives reload). oidc-client-ts validates the id_token against the issuer
- *    JWKS (sig/iss/aud/exp). Swap to `window.sessionStorage` for a tab-scoped session.
- *  - C3 — `automaticSilentRenew: true` (refresh-token grant; CONFIRMED vs Cognito, PoC 2026-06-17).
- *  - C5 — `onSigninCallback` scrubs ?code/?state from the URL via history.replaceState.
- *  - C8 — `scope` from config. (Per-IdP `identity_provider` is passed at signIn time,
- *    see useAuthService.signIn, so a single client supports the configured provider mix.)
+ *   - authority = user-pool issuer (JWKS discovery — C2)
+ *   - response_type 'code' + PKCE is the oidc-client-ts default (C1)
+ *   - automaticSilentRenew (C3); userStore localStorage (C2 fleet default)
  */
-export function buildOidcConfig(config: AuthConfig = authConfig): AuthProviderProps {
+export function buildUserManagerSettings(config: AuthConfig = authConfig): UserManagerSettings {
   return {
     authority: cognitoAuthority(config),
     client_id: config.clientId,
     redirect_uri: `${appOrigin()}/auth/callback`, // C5 callback target
-    post_logout_redirect_uri: postLogoutUrl(), // C4 landing
+    post_logout_redirect_uri: postLogoutUrl(config), // C4 landing
     scope: config.scopes.join(' '), // C8
-    automaticSilentRenew: true, // C3 silent refresh
+    automaticSilentRenew: true, // C3 silent refresh — CONFIRMED vs Cognito, PoC 2026-06-17
     userStore: new WebStorageStateStore({ store: window.localStorage }), // C2 — fleet default
-    // C5 — strip the OAuth params from the URL after a successful sign-in.
+  };
+}
+
+let sharedUserManager: UserManager | undefined;
+
+/**
+ * The ONE UserManager the app uses. The hook (via <AuthProvider userManager>) and the
+ * non-hook GraphQL helpers (auth/graphqlAuth.ts) share it, so both see the same session,
+ * the same silent renewals and the same store. Lazy: `WebStorageStateStore` touches
+ * `window`, and this module is imported by files that may load outside a browser.
+ */
+export function getUserManager(config: AuthConfig = authConfig): UserManager {
+  if (!sharedUserManager) {
+    sharedUserManager = new UserManager(buildUserManagerSettings(config));
+  }
+  return sharedUserManager;
+}
+
+/**
+ * Props for react-oidc-context's <AuthProvider>: the shared UserManager plus the
+ * provider-level callbacks.
+ *   - onSigninCallback: C5 — scrub ?code/?state from the URL via history.replaceState once
+ *     the library has consumed them. CallbackPage's replace-navigation reinforces this.
+ */
+export function buildProviderProps(config: AuthConfig = authConfig): AuthProviderProps {
+  return {
+    userManager: getUserManager(config),
     onSigninCallback: () => {
       window.history.replaceState({}, document.title, window.location.pathname);
     },
   };
+}
+
+/** @deprecated since 0.4.0 — use buildProviderProps(). Removed in 0.5.0. */
+export function buildOidcConfig(config: AuthConfig = authConfig): AuthProviderProps {
+  return buildProviderProps(config);
 }

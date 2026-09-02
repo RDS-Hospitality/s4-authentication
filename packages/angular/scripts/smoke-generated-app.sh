@@ -23,13 +23,22 @@ TARBALL="$(ls "$WORK"/s4-auth-angular-*.tgz 2>/dev/null | head -1)"
     --routing --style=css --ssr=false --skip-git --skip-tests --defaults >/dev/null )
 APP="$WORK/smokeapp"
 
+# Pre-seed the bare provideHttpClient() a real standalone app has, so the installer's
+# C9 wiring path (add-http-client.ts) is exercised — a stock `ng new` has no HttpClient.
+( cd "$APP" && sed -i "s|providers: \\[|providers: [provideHttpClient(), |" src/app/app.config.ts \
+    && sed -i "1i import { provideHttpClient } from '@angular/common/http';" src/app/app.config.ts )
 # 3. Install the tarball and run the ng-add schematic with sample values.
 ( cd "$APP" && npm i "$TARBALL" >/dev/null \
     && npx ng g s4-auth-angular:ng-add \
          --user-pool-id=us-east-1_SMOKE --client-id=smokeclient \
          --cognito-domain=smoke.auth.us-east-1.amazoncognito.com --providers=google \
+         --post-login-route=/ \
        >/dev/null )
 
 # 4. The real check: the generated tree must compile.
+grep -q 'provideHttpClient(withInterceptors(\[graphqlAuthInterceptor\])' "$APP/src/app/app.config.ts" \
+  || { echo "SMOKE FAIL: installer did not wire withInterceptors([graphqlAuthInterceptor]) into provideHttpClient()" >&2; exit 1; }
+grep -q "postLoginRoute: '/'" "$APP/src/app/auth.config.ts" \
+  || { echo "SMOKE FAIL: postLoginRoute option not applied" >&2; exit 1; }
 ( cd "$APP" && npx ng build >/dev/null )
-echo "SMOKE PASS: generated app compiled (ng build succeeded)."
+echo "SMOKE PASS: generated app compiled (ng build succeeded) with the HttpClient interceptor wired."

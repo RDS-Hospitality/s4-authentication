@@ -18,8 +18,12 @@
 import React from 'react';
 import { AuthProvider } from 'react-oidc-context';
 
-import { authConfig, buildOidcConfig } from '../auth.config';
+import { authConfig, buildProviderProps } from '../auth.config';
 
+/**
+ * Passes the shared UserManager (auth.config getUserManager) rather than raw settings, so
+ * the non-hook GraphQL helpers in auth/graphqlAuth.ts read the same session the hook drives.
+ */
 export function AuthRoot({ children }: { children: React.ReactNode }) {
-  return <AuthProvider {...buildOidcConfig(authConfig)}>{children}</AuthProvider>;
+  return <AuthProvider {...buildProviderProps(authConfig)}>{children}</AuthProvider>;
 }

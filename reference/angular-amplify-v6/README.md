@@ -15,6 +15,12 @@ inventing a rule, it belongs in `/STANDARD.md` (the port), not in an adapter.
 **The React adapter** lives at `reference/react-oidc/` (sibling), not by editing
 this one. The Contract does not move when a stack is added.
 
+**This directory is GENERATED.** The source of truth is the ng-add templates in
+`packages/angular/schematics/ng-add/files/src/app/` (that is what ships); this is
+their rendering with the documented placeholder values, produced by
+`packages/angular/scripts/render-reference.sh`. Edit a template, re-run the script.
+`render-reference.sh --check` fails when the two drift.
+
 ## Realizes
 
 | Clause | How this adapter realizes it |
@@ -27,15 +33,17 @@ this one. The Contract does not move when a stack is added.
 | C6 Post-login redirect | `authGuard` attaches `returnUrl=state.url` on denial; `AuthService.signIn` passes it as `customState`, recovered via the `customOAuthState` Hub event into `pendingReturnUrl`; `resolvePostLoginTarget` reads it via `takeReturnUrl()` (NOT a query param) → returnUrl, else explicit `?returnUrl`, else the single `authConfig.postLoginRoute`. No hardcoded landing literal. |
 | C7 Route guards | `authGuard` (functional `CanActivateFn`) applied by default; truth from verified session; every non-authenticated and every `catch` branch returns a redirect `UrlTree`, never `true`. `roleGuard` factory same fail-closed posture. No escape-hatch param/flag exists. |
 | C8 Provider config | `auth.config.ts` `providers`/`scopes` are the sole switch; `buildAmplifyConfig` maps them into `loginWith.oauth`; `LoginComponent.providers` renders only `authConfig.providers`; `AuthService.signIn` refuses a non-configured provider. Baseline scopes `openid email profile`; admin scope opt-in. |
+| C9 Data-layer credential | `auth/graphql-auth.ts`: `GraphqlAuthInterceptor` (class, registered by `provide-auth.ts` via `HTTP_INTERCEPTORS` — covers `HttpClientModule` / `withInterceptorsFromDi()` apps) and `graphqlAuthInterceptor` (functional, wired by the installer into a bare `provideHttpClient()`) attach `Authorization: Bearer <ID token>` from `fetchAuthSession()` ONLY to requests matching `authConfig.graphqlUrls` (`auth/url-allowlist.ts`, segment-boundary prefix match); `graphqlConnectionParams()` does the same for a GraphQL WebSocket. apollo-angular's `HttpLink` rides on `HttpClient`, so Apollo HTTP traffic is covered without an Apollo dependency. `auth/roles.ts` reads `hasura_allowed_roles` / `hasura_default_role` from the ID token; `roleGuard(...)` gates routes on them and denies to `/login?denied=role`; `warnIfNoRoleClaim` logs once when the token carries no role claim (the client is outside the pool's claims-emission set). |
 
 ## Layout
 
 - `auth.config.ts` — config instance (machine-readable contract half; see `/STANDARD.md`)
 - `login/` — provider-configurable login/home component
-- `auth/` — auth service, guards, session/idle policy, and `provide-auth.ts`
-  (the app-bootstrap shim filling the `Amplify.configure(...)` call site
-  `auth.config.ts:189` documents; added 2026-06-16 as an additive completion
-  of the otherwise-frozen adapter — see the `s4-auth-angular` Plan 2)
+- `auth/` — auth service, guards, session/idle policy, `provide-auth.ts` (the
+  app-bootstrap shim: `Amplify.configure(...)` + the C9 interceptor registration),
+  `graphql-auth.ts` (C9 bearer interceptor + WebSocket `connectionParams`), and the
+  two pure modules shared byte-for-byte with the React adapter — `roles.ts` and
+  `url-allowlist.ts` (tested once, in the React CLI's vitest suite)
 
 ## Visual standard
 

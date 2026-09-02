@@ -7,7 +7,9 @@
     "project": {
       "type": "string",
       "description": "Target Angular project name.",
-      "$default": { "$source": "projectName" }
+      "$default": {
+        "$source": "projectName"
+      }
     },
     "userPoolId": {
       "type": "string",
@@ -35,7 +37,18 @@
       "description": "Login-card heading.",
       "default": "Sign in",
       "x-prompt": "Login-card heading?"
+    },
+    "postLoginRoute": {
+      "type": "string",
+      "description": "Post-login landing route (C6). Must start with '/'.",
+      "default": "/",
+      "pattern": "^/",
+      "x-prompt": "Post-login landing route? (e.g. / or /dashboard)"
     }
   },
-  "required": ["userPoolId", "clientId", "cognitoDomain"]
+  "required": [
+    "userPoolId",
+    "clientId",
+    "cognitoDomain"
+  ]
 }

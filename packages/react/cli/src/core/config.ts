@@ -59,3 +59,12 @@ export function resolveFromFlags(flags: Record<string, string>): ResolvedConfig 
 
   return { cognito, patch, missingCognito };
 }
+
+/**
+ * C6 — the landing route is an in-app path. `<Navigate to="dashboard">` (no slash) resolves
+ * RELATIVE to the current route and a full URL becomes a literal path segment, so both are
+ * silently broken navigation. Same rule as the Angular schematic's `pattern: "^/"`.
+ */
+export function postLoginRouteError(route: string): string | null {
+  return route.startsWith("/") ? null : `post-login route must start with "/" (got "${route}")`;
+}

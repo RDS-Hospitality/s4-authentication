@@ -16,7 +16,7 @@ One auto-detecting command. It inspects the target directory and picks the path 
 ```bash
 # add auth to the app in the current directory (pinned to a release tag — reproducible,
 # the right posture for an auth boundary):
-npx git+https://github.com/RDS-Hospitality/s4-authentication.git#react-v0.3.2 . \
+npx git+https://github.com/RDS-Hospitality/s4-authentication.git#react-v0.4.0 . \
   --user-pool-id us-east-1_xxxxxxxxx \
   --client-id xxxxxxxxxxxxxxxxxxxxxxxxxx \
   --cognito-domain your-prefix.auth.us-east-1.amazoncognito.com \
@@ -71,7 +71,8 @@ instead.
 ## What the installer does
 
 - **Copies** the adapter into `src/` — `auth.config.ts`, `auth/` (AuthRoot, RequireAuth, RequireRole,
-  useAuthService, useIdleTimeout), `login/` (LoginPage, CallbackPage, loginState), `auth.css`, and `vite-env.d.ts`.
+  useAuthService, useIdleTimeout, graphqlAuth, roles, urlAllowlist), `login/` (LoginPage, CallbackPage,
+  loginState), `auth.css`, and `vite-env.d.ts`.
   If the app already has its own `src/vite-env.d.ts`, that file is **left untouched** and the adapter's
   ambient types go to `src/s4-auth-env.d.ts` beside it, so your `vite/client` reference survives.
 - **Installs** `react-oidc-context`, `oidc-client-ts`, and a React Router v7 package via the detected
@@ -109,7 +110,7 @@ target-dir              Install into this dir (default ".").
 --region <r>            AWS region                     (else prompted)
 --providers <list>      Comma-separated IdPs, e.g. google,microsoft (default google)
 --app-title <title>     Login-card heading (C8)
---post-login-route <r>  Route to land on after login (default /home)
+--post-login-route <r>  Route to land on after login (default /; must start with /)
 --yes                   Accept defaults / skip optional prompts
 --force                 Overwrite an existing install
 -h, --help              Show help     -v, --version   Print version
@@ -177,6 +178,28 @@ import { CallbackPage } from './login/CallbackPage';
 put `AuthRoot` inside the `App` that renders `<RouterProvider>`, gate the group with the route
 `element` (not a `loader` — a loader runs outside React and can't read auth), and move every route
 into `children`.
+
+## Send the user's token to your GraphQL API (C9)
+
+**Gate first:** your app's Cognito client must be in the pool's claims-emission set before you
+remove an admin secret — see `docs/MIGRATE-0.3-TO-0.4.md` step 0 on `main`.
+
+1. Set `graphqlUrls` in `src/auth.config.ts`, e.g. `['https://api.s4hospitality.net', '/hasura-api']`.
+2. Attach the header where your client lives (`src/auth/graphqlAuth.ts`):
+   Apollo `setContext(async () => ({ headers: await graphqlAuthHeaders() }))`; graphql-ws
+   `connectionParams: graphqlConnectionParams`; plain `authFetch(url, init)` (attaches only for
+   `graphqlUrls`). All three share the provider's `UserManager`, renew an expired token once, and
+   never send a stale one.
+3. Roles: `<RequireRole anyOf={['dashboard_readonly']}>` around the root protected layout is the
+   app-wide floor (reads `hasura_allowed_roles` from the ID token; denies to `/login` with a
+   `denied` marker the LoginPage honours). `useAuthService().roles` / `.role` for display. Do not use
+   it behind a pool that mints no role claim — it denies everyone there.
+4. Dispose your GraphQL WebSocket client where you call `logout()`; `connectionParams` re-evaluates
+   only on reconnect.
+
+Status: no React app runs this path against a live pool yet; it is verified by typecheck and the
+CLI test suite. If the console shows `s4-auth: … token carries no "hasura_allowed_roles" claim`,
+the client is not in the emission set — stop and fix step 0.
 
 ## Verify
 

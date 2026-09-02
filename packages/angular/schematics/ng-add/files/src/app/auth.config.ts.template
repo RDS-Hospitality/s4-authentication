@@ -16,6 +16,12 @@
  * The Output -> config mapping is called out per field. At deploy time these are
  * injected (env substitution / Angular environment file / runtime config fetch);
  * the placeholders below are the ONLY things that are deploy-time-specific.
+ *
+ * DATA-LAYER PRECONDITION (C9): before `graphqlUrls` is set and an admin secret is
+ * removed, this app's Cognito client must be in the pool's claims-emission set (the
+ * PreTokenGeneration Lambda mints the role claims per client). A token without a role
+ * claim is still sent — the data layer then applies its own default role — and the
+ * adapter logs a console error naming the cause. See docs/MIGRATE-0.3-TO-0.4.md.
  */
 
 /** The set of IdPs this adapter knows how to render + initiate (C8). */
@@ -50,18 +56,15 @@ export interface AuthConfig {
   providers: Provider[];
 
   /**
-   * Access gate — email domains permitted to use this app, checked in `authGuard`
-   * AFTER a verified session. SECURE BY DEFAULT: if omitted, only `rdspos.com`
-   * may enter, so an unconfigured / in-development app is closed, not open.
-   *   - internal app  → omit (defaults to `['rdspos.com']`)
-   *   - allowlist app → `['rdspos.com', 'customer.xyz']`
-   *   - open app      → `['*']` (admit any Google account)
-   * This is the interim in-app gate. It is a SOFT gate (a token is still issued;
-   * the guard blocks the UI) — the API/Hasura must enforce the same rule for
-   * sensitive data. When the role solution lands it replaces this check at the
-   * same guard/API seam (upgrade-in-place). Matching is case-insensitive.
+   * Vocab `graphqlUrls` — data-API endpoints that receive the user's bearer token.
+   * Drives C9. Each entry is an absolute origin (`https://api.example.com`, optionally
+   * with a path) or a same-origin path prefix (`/hasura-api`, e.g. a dev-server proxy).
+   * A request matches only at a segment boundary, so `/hasura-api` never matches
+   * `/hasura-apiv2`. Prefer path-scoped entries when the host also serves other
+   * content: a bare origin sends the token on EVERY request to that origin. Empty
+   * (the default) attaches nothing — the interceptor is a no-op.
    */
-  allowedEmailDomains?: string[];
+  graphqlUrls: string[];
 
   /**
    * Optional login-card heading ("Dashboard Login", "Acme Reports", …).
@@ -130,9 +133,9 @@ export const authConfig: AuthConfig = {
   // Set to ['google','microsoft'] for both, ['microsoft'] for MS-only, etc.
   providers: [<%= providersLiteral %>],
 
-  // Access gate — SECURE BY DEFAULT (S4 only). ['*'] = any Google account (open
-  // app); ['rdspos.com','customer.xyz'] = allowlist. Enforced in authGuard.
-  allowedEmailDomains: ['rdspos.com'],
+  // C9 — data-API endpoints that receive the bearer token. Set per deployment,
+  // e.g. ['https://api.s4hospitality.net', '/hasura-api']. Empty = no-op.
+  graphqlUrls: [],
 
   // Presentation — login-card heading. Omit to get the "Sign in" default.
   appTitle: '<%= appTitle %>',
@@ -145,8 +148,8 @@ export const authConfig: AuthConfig = {
   // calls Cognito user APIs client-side (opt-in).
   scopes: ['openid', 'email', 'profile'],
 
-  // C6 — single configurable landing route.
-  postLoginRoute: '/home',
+  // C6 — single configurable landing route (installer option `postLoginRoute`).
+  postLoginRoute: '<%= postLoginRoute %>',
 
   session: {
     accessTtl: 60 * MIN, // C3: 60 min

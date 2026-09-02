@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { ParsedArgs } from "./args";
-import { resolveFromFlags, COGNITO_FIELDS } from "./core/config";
+import { resolveFromFlags, postLoginRouteError, COGNITO_FIELDS } from "./core/config";
 import { depInstallFailed } from "./core/deps";
 import { applyCore, isAlreadyInstalled, type CoreOutput } from "./core/install";
 import { detectRouterPackage, type RouterPackage } from "./core/router-package";
@@ -94,6 +94,13 @@ async function installCore(ctx: CommandContext, info: TargetInfo): Promise<numbe
   }
 
   const resolved = resolveFromFlags(ctx.args.flags);
+  if (resolved.patch.postLoginRoute !== undefined) {
+    const problem = postLoginRouteError(resolved.patch.postLoginRoute);
+    if (problem) {
+      p.log.error(`--post-login-route: ${problem}`);
+      return 2;
+    }
+  }
 
   // 1. Required Cognito values — flags first, prompt for the rest (error under --yes).
   const cognito: Partial<CognitoConfig> = { ...resolved.cognito };
@@ -117,7 +124,7 @@ async function installCore(ctx: CommandContext, info: TargetInfo): Promise<numbe
   }
 
   // 2. Optional per-app patch — flags first, then prompt the light ones (skipped under --yes,
-  //    which keeps the template defaults: providers ['google'], appTitle 'Sign in', /home).
+  //    which keeps the template defaults: providers ['google'], appTitle 'Sign in', /).
   const patch: AuthConfigPatch = { ...resolved.patch };
   if (!yes) {
     if (patch.providers === undefined) {
@@ -130,7 +137,12 @@ async function installCore(ctx: CommandContext, info: TargetInfo): Promise<numbe
       if (list.length > 0) patch.providers = list;
     }
     if (patch.postLoginRoute === undefined) {
-      const answer = await p.text({ message: "Post-login route", placeholder: "/home", defaultValue: "/home" });
+      const answer = await p.text({
+        message: "Post-login route",
+        placeholder: "/",
+        defaultValue: "/",
+        validate: (v) => postLoginRouteError((v ?? "").trim() || "/") ?? undefined,
+      });
       if (p.isCancel(answer)) {
         p.cancel("Cancelled — no files changed.");
         return 1;
@@ -218,8 +230,13 @@ async function installCore(ctx: CommandContext, info: TargetInfo): Promise<numbe
           "  2. Arm idle-logout in your app shell:",
           "       const { logout } = useAuthService(); useIdleTimeout(logout);",
           "  3. Audit your logout for app-state teardown.",
+          "  4. GraphQL (C9): set graphqlUrls in src/auth.config.ts and attach graphqlAuthHeaders()/authFetch;",
+          "     for an app-wide role floor wrap the root layout in <RequireRole anyOf={[...]}>.",
+          "     BEFORE removing an admin secret confirm this app client is in the pool's claims-emission",
+          "     set (docs/MIGRATE-0.3-TO-0.4.md step 0) — otherwise the data layer applies its own default role.",
         ]
-      : ["Boots to /login. Swap the demo src/App.tsx for your app when ready."];
+      : ["Boots to /login. Swap the demo src/App.tsx for your app when ready.",
+         "GraphQL (C9): set graphqlUrls in src/auth.config.ts; see docs/MIGRATE-0.3-TO-0.4.md step 0 before removing any admin secret."];
   const incomplete = depsFailed
     ? [
         "INSTALL INCOMPLETE — dependencies did not install.",

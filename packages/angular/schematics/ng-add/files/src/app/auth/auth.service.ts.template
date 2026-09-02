@@ -30,6 +30,7 @@ import { Hub } from 'aws-amplify/utils';
 import { fromEvent, merge, Observable, Subject, Subscription } from 'rxjs';
 
 import { AMPLIFY_PROVIDER, authConfig, type Provider } from '../auth.config';
+import { readDefaultRole, readRoles } from './roles';
 
 /** A trust-bearing view of the session, only ever built from a verified session. */
 export interface AuthState {
@@ -38,6 +39,8 @@ export interface AuthState {
   email?: string;
   /** Verified `sub` claim, for correlating requests. */
   userId?: string;
+  /** Default role minted on the ID token (`defaultRoleClaim`) — display only; guards use getRoles(). */
+  role?: string;
 }
 
 const ACTIVITY_EVENTS = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
@@ -210,10 +213,26 @@ export class AuthService {
   }
 
   /**
+   * Realizes STANDARD.md C9 (role source) — the roles minted on the ID token
+   * (`roleClaim`, fleet default `hasura_allowed_roles`), read from the SDK-verified
+   * session. `[]` when there is no session, no claim, or any error: `roleGuard`
+   * denies on an empty set, and the data layer applies its own default role. The
+   * access token carries the same claims; the ID token is what the data layer receives.
+   */
+  async getRoles(): Promise<string[]> {
+    try {
+      const session = await fetchAuthSession();
+      return readRoles(session.tokens?.idToken?.payload);
+    } catch {
+      return []; // C7 — error path yields no roles (deny, never assume)
+    }
+  }
+
+  /**
    * The verified `email` claim from the current session's ID token, or null.
    * Source-of-truth is `fetchAuthSession` (SDK/JWKS-verified) — never a token we
-   * decode ourselves. Drives the `allowedEmailDomains` gate in `authGuard`.
-   * Fail-closed: any error or missing claim => null (guard treats null as denied).
+   * decode ourselves. Display only (greeting, support diagnostics).
+   * Any error or missing claim => null.
    */
   async getEmail(): Promise<string | null> {
     try {
@@ -255,6 +274,7 @@ export class AuthService {
         authenticated: true,
         email: typeof idPayload?.['email'] === 'string' ? (idPayload['email'] as string) : undefined,
         userId: typeof idPayload?.['sub'] === 'string' ? (idPayload['sub'] as string) : undefined,
+        role: readDefaultRole(idPayload),
       });
     } catch {
       this.state.set({ authenticated: false }); // fail-closed

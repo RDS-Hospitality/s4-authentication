@@ -5,6 +5,8 @@
  * LoginPage that receives them:
  *   - RequireAuth forwards `returnUrl` (C6) when it bounces an unauthenticated visit.
  *   - CallbackPage forwards `error` when the OIDC code exchange fails (C7 spirit).
+ *   - RequireRole forwards `denied: 'role'` for a signed-in user without the role; the
+ *     LoginPage must then NOT auto-forward them back into the app (it would loop).
  *
  * React Router types `location.state` as `unknown`, so a writer and a reader that each
  * spell the shape inline can drift apart with no compile error — that is exactly how the
@@ -21,6 +23,8 @@ export interface LoginLocationState {
   returnUrl?: string;
   /** Human-readable reason the previous sign-in attempt failed. Rendered by LoginPage. */
   error?: string;
+  /** Set when a signed-in user was turned away by a role gate. Suppresses auto-forward. */
+  denied?: 'role';
 }
 
 export function readLoginState(state: unknown): LoginLocationState {
@@ -34,6 +38,9 @@ export function readLoginState(state: unknown): LoginLocationState {
   }
   if (typeof candidate.error === 'string' && candidate.error.length > 0) {
     out.error = candidate.error;
+  }
+  if (candidate.denied === 'role') {
+    out.denied = 'role';
   }
   return out;
 }

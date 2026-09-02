@@ -174,6 +174,21 @@ export class LoginComponent implements OnInit {
     // C6 — capture the returnUrl the authGuard attached when bouncing the user here.
     this.returnUrl.set(this.route.snapshot.queryParamMap.get('returnUrl'));
 
+    // roleGuard bounces denied users here with ?denied=role. Surface the reason
+    // and — crucially — SKIP the auto-forward below: they hold a verified session
+    // but lack the role, so forwarding them into the app would bounce straight
+    // back to the guard (an infinite loop). Any `denied` value suppresses the
+    // forward; unknown values still get a message rather than a blank card.
+    const denied = this.route.snapshot.queryParamMap.get('denied');
+    if (denied !== null) {
+      this.error.set(
+        denied === 'role'
+          ? 'Your account has not been granted access to this application.'
+          : 'Your account is not permitted to access this application.',
+      );
+      return;
+    }
+
     // If a redirect failed, the query may carry an error description.
     const err = this.route.snapshot.queryParamMap.get('error_description')
       ?? this.route.snapshot.queryParamMap.get('error');

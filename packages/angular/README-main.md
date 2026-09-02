@@ -11,7 +11,7 @@ everything at its root; it is regenerated per release and is not where developme
 
 ```bash
 # 1. add the Angular package — pinned to a release tag (reproducible; recommended for auth)
-npm i git+https://github.com/RDS-Hospitality/s4-authentication.git#angular-v0.3.1
+npm i git+https://github.com/RDS-Hospitality/s4-authentication.git#angular-v0.4.0
 
 #    …or track the branch tip for the latest build:
 #    npm i git+https://github.com/RDS-Hospitality/s4-authentication.git#angular
@@ -21,13 +21,35 @@ ng g s4-auth-angular:ng-add \
   --user-pool-id=us-east-1_xxxx \
   --client-id=xxxxxxxxxxxxxxxxxxxxxx \
   --cognito-domain=your-prefix.auth.us-east-1.amazoncognito.com \
-  --providers=google
+  --providers=google \
+  --post-login-route=/
 ```
 
 This scaffolds the auth source into `src/app/` (you own and may edit it), inserts
 `provideAuth()` into the root config (`app.config.ts` for standalone apps, `AppModule`
 for NgModule apps — auto-detected), adds the `login` + `auth/callback` routes (into
-`app.routes.ts` or `app-routing.module.ts`), and adds `aws-amplify@^6.17.0`.
+`app.routes.ts` or `app-routing.module.ts`), wires the C9 bearer interceptor into a
+standalone app's `provideHttpClient(...)` (or tells you to), and adds `aws-amplify@^6.17.0`.
+
+## Send the user's token to your GraphQL API (C9)
+
+**Gate first:** your app's Cognito client must be in the pool's claims-emission set before you
+remove an admin secret — see [`docs/MIGRATE-0.3-TO-0.4.md`](https://github.com/RDS-Hospitality/s4-authentication/blob/main/docs/MIGRATE-0.3-TO-0.4.md) step 0.
+
+1. Set `graphqlUrls` in `src/app/auth.config.ts`, e.g. `['https://api.s4hospitality.net', '/hasura-api']`.
+2. Attach the header:
+   - `HttpClientModule` or `provideHttpClient(withInterceptorsFromDi())` apps: nothing to do —
+     `provideAuth()` registers the class interceptor, and apollo-angular's `HttpLink` uses `HttpClient`.
+   - Standalone `provideHttpClient()`: `ng add` inserts `withInterceptors([graphqlAuthInterceptor])`;
+     if you add HttpClient later, add it yourself (`import { graphqlAuthInterceptor } from './auth/graphql-auth'`).
+   - GraphQL WebSocket: `connectionParams: graphqlConnectionParams` (same module).
+3. Roles: `roleGuard('dashboard_readonly')` on the root protected route is the app-wide floor
+   (it reads `hasura_allowed_roles` from the ID token and denies to `/login?denied=role`);
+   `AuthService.getRoles()` / `state().role` for display. Do not use it behind a pool that mints
+   no role claim — it denies everyone there.
+
+If the console shows `s4-auth: … token carries no "hasura_allowed_roles" claim`, the client is not
+in the emission set: the data layer is applying its own default role. Stop and fix step 0.
 
 > Prefer to wire it in by hand? See [`schematics/MANUAL-INSTALL.md`](./schematics/MANUAL-INSTALL.md).
 
