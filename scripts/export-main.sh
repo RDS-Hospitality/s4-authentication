@@ -38,6 +38,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) VERSION="${2:?--version needs a value}"; shift 2 ;;
     --only)    ONLY="${2:?--only needs a value (angular|react)}"; shift 2 ;;
+    -h|--help) echo "Usage: export-main.sh [--version X.Y.Z] [--only angular|react|flask]"; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 2 ;;
   esac
 done

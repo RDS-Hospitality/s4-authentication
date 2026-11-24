@@ -3,6 +3,7 @@
 Releases are tags on the distribution branches: `angular-vX.Y.Z`, `react-vX.Y.Z` and `flask-vX.Y.Z`.
 The Flask package versions independently of the other two.
 A tag never moves once published; older tags stay installable.
+The release process is in [`RELEASING.md`](./RELEASING.md).
 
 ## Unreleased
 

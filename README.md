@@ -13,7 +13,7 @@ per-framework adapters that all implement one auth contract: [`STANDARD.md`](./S
 Pin to a release **tag** — reproducible and auditable, the right posture for an auth
 boundary. (Branch tips `#angular` / `#react` track the latest build.) A published tag never
 moves; the 0.3.x tags remain installable for apps not yet on the JWT data layer. Upgrading? See [`docs/MIGRATE-0.3-TO-0.4.md`](./docs/MIGRATE-0.3-TO-0.4.md) — and its
-gate — first. Release notes: [`CHANGELOG.md`](./CHANGELOG.md).
+gate — first. Release notes: [`CHANGELOG.md`](./CHANGELOG.md). Cutting a release: [`RELEASING.md`](./RELEASING.md).
 
 **Angular** (14+, standalone or NgModule):
 
