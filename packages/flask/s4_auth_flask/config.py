@@ -6,6 +6,8 @@ from datetime import timedelta
 from typing import Any, Literal, Mapping
 from urllib.parse import urlencode
 
+from s4_auth_flask.redirects import safe_return_path
+
 BASELINE_SCOPES = ("openid", "email", "profile")
 _IDP_NAMES = {"google": "Google", "microsoft": "Microsoft"}
 _LOCAL_HTTP = ("http://localhost", "http://127.0.0.1")
@@ -47,8 +49,11 @@ class AuthConfig:
         if unknown:
             raise ValueError(f"unknown providers: {unknown}; allowed: google, microsoft")
         route = self.post_login_route
-        if not route.startswith("/") or route.startswith("//"):
-            raise ValueError("post_login_route must start with a single '/'")
+        if safe_return_path(route) is None:
+            raise ValueError(
+                "post_login_route must be a same-origin path starting with a single '/' "
+                "and containing no backslashes or control characters"
+            )
         if not (self.base_url.startswith("https://") or _is_local_http(self.base_url)):
             raise ValueError("base_url must be https:// (http only for localhost/127.0.0.1)")
         missing = [s for s in BASELINE_SCOPES if s not in self.scopes]

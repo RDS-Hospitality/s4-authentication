@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from flask import Response, abort, after_this_request, current_app, redirect, request, session, url_for
 
-from s4_auth_flask.roles import has_any_role, read_roles, warn_if_no_role_claim
+from s4_auth_flask.roles import has_any_role, read_default_role, read_roles, warn_if_no_role_claim
 from s4_auth_flask.url_allowlist import matches_allowlist
 
 _PUBLIC_ATTR = "_s4_public"
@@ -176,7 +176,11 @@ def current_user() -> dict | None:
     claims = _claims()
     if claims is None:
         return None
-    return {**claims, "roles": current_roles()}
+    return {
+        **claims,
+        "roles": current_roles(),
+        "default_role": read_default_role(claims, _auth().config.default_role_claim),
+    }
 
 
 def auth_headers(url: str) -> dict[str, str]:

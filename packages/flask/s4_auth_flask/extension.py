@@ -141,7 +141,8 @@ class S4Auth:
         self._configure_sessions(app, config)
         self._register_client(app, config)
         app.register_blueprint(self._blueprint(config), url_prefix="/auth")
-        app.before_request(guard)
+        # Inserted first: an app hook registered earlier must not run before the guard.
+        app.before_request_funcs.setdefault(None, []).insert(0, guard)
         app.extensions["s4_auth"] = self
 
     def _configure_sessions(self, app: Flask, config: AuthConfig) -> None:
@@ -158,6 +159,10 @@ class S4Auth:
             SESSION_COOKIE_PATH=path,
         )
         if config.session_backend == "dynamodb":
+            if self.session_resource is None:
+                raise ValueError(
+                    'session_backend="dynamodb" requires S4Auth(..., session_resource=<boto3 dynamodb resource>)'
+                )
             app.config.update(
                 SESSION_TYPE="dynamodb",
                 SESSION_DYNAMODB=_NeverCreateTable(self.session_resource),
@@ -248,16 +253,25 @@ class S4Auth:
         except (*_CALLBACK_FAILURES, requests.RequestException, KeyError, ValueError):
             _log.warning("s4-auth: token refresh failed; ending the session")
             return False
-        expires_in = body.get("expires_in") or self.config.access_ttl.total_seconds()
         session[TOKENS] = {
             "id_token": body["id_token"],
             "access_token": body.get("access_token"),
             # Cognito's refresh reply carries no new refresh token; keep the one we hold.
             "refresh_token": body.get("refresh_token") or refresh_token,
-            "expires_at": now + expires_in,
+            "expires_at": self._expires_at(now, body.get("expires_in"), claims),
         }
         session[CLAIMS] = claims
         return True
+
+    def _expires_at(self, now: float, expires_in: Any, claims: Any) -> float:
+        """Earliest of the IdP's stated lifetime, the configured access_ttl and the ID token's exp."""
+        limits = [now + self.config.access_ttl.total_seconds()]
+        if isinstance(expires_in, (int, float)) and expires_in > 0:
+            limits.append(now + expires_in)
+        exp = claims.get("exp")
+        if isinstance(exp, (int, float)):
+            limits.append(exp)
+        return min(limits)
 
     def _register_client(self, app: Flask, config: AuthConfig) -> None:
         self.oauth = OAuth(app)
@@ -269,6 +283,7 @@ class S4Auth:
             client_kwargs={
                 "scope": " ".join(config.scopes),
                 "code_challenge_method": "S256",
+                "default_timeout": _HTTP_TIMEOUT,
             },
         )
 
@@ -319,7 +334,7 @@ class S4Auth:
                 "id_token": token["id_token"],
                 "access_token": token.get("access_token"),
                 "refresh_token": token.get("refresh_token"),
-                "expires_at": token.get("expires_at"),
+                "expires_at": self._expires_at(_now(), token.get("expires_in"), claims),
             }
             session[CLAIMS] = claims
             session[LAST_ACTIVITY] = _now()
