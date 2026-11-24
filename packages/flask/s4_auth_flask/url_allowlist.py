@@ -10,6 +10,9 @@ _DOT = re.compile(r"^(\.|%2e)$", re.IGNORECASE)
 _DOTDOT = re.compile(r"^(\.|%2e){2}$", re.IGNORECASE)
 
 
+_UNSAFE = re.compile(r"[\\\x00-\x20\x7f]")
+
+
 def _strip_trailing_slash(path: str) -> str:
     return path[:-1] if len(path) > 1 and path.endswith("/") else path
 
@@ -58,6 +61,8 @@ def _matches_absolute(url: str, entry: str) -> bool:
     except ValueError:
         return False
     ek, uk = _origin_key(e), _origin_key(u)
+    if "@" in e.netloc or "@" in u.netloc:
+        return False
     if ek is None or uk is None or e.query or e.fragment:
         return False
     if ek != uk:
@@ -83,9 +88,13 @@ def _matches_path_prefix(url: str, entry: str, current_origin: str | None) -> bo
 
 
 def matches_allowlist(url: str, entries: Sequence[str], current_origin: str) -> bool:
+    # WHATWG parsers read `\\` as `/`; urlsplit does not, so the two disagree on the host.
+    # Fail closed on anything ambiguous rather than guess.
+    if _UNSAFE.search(url):
+        return False
     for raw in entries:
         entry = raw.strip()
-        if not entry:
+        if not entry or _UNSAFE.search(entry):
             continue
         if _ABSOLUTE.match(entry):
             if _matches_absolute(url, entry):

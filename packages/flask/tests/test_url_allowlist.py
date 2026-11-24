@@ -32,6 +32,13 @@ CASES = [
     ('origin_entry_matches_path_under_it', 'https://api.s4hospitality.net/v1/graphql', ['https://api.s4hospitality.net'], ORIGIN, True),
     ('absolute_entry_with_path_boundary_ok', 'https://api.s4hospitality.net/v1/graphql', ['https://api.s4hospitality.net/v1'], ORIGIN, True),
     ('absolute_entry_with_path_boundary_bad', 'https://api.s4hospitality.net/v10/graphql', ['https://api.s4hospitality.net/v1'], ORIGIN, False),
+    ("backslash_authority_userinfo", "https://evil.com\\@api.s4hospitality.net/x", ["https://api.s4hospitality.net"], "https://a.b", False),
+    ("plain_userinfo_url", "https://user@api.s4hospitality.net/x", ["https://api.s4hospitality.net"], ORIGIN, False),
+    ("userinfo_in_entry", "https://api.s4hospitality.net/x", ["https://user@api.s4hospitality.net"], ORIGIN, False),
+    ("backslash_in_entry", "https://api.s4hospitality.net/x", ["https://api.s4hospitality.net\\x"], ORIGIN, False),
+    ("backslash_in_path_entry", ORIGIN + "/hasura-api/x", ["/hasura-api\\x"], ORIGIN, False),
+    ("control_char_in_url", "https://api.s4hospitality.net/x\n", ["https://api.s4hospitality.net"], ORIGIN, False),
+    ("tab_in_url", "https://api.s4hospitality.net/\tx", ["https://api.s4hospitality.net"], ORIGIN, False),
 ]
 
 
