@@ -133,3 +133,16 @@ def test_activity_written_at_most_once_a_minute(app, client, clock, monkeypatch)
         clock(5)
         assert get(client).status_code == 200
     assert len(saves) == 1
+
+
+def test_idle_expiry_with_failing_record_delete_still_denies(app, client, clock, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(app.session_interface._inner, "_delete_session", boom)
+    clock(31 * 60)
+    resp = get(client)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/auth/login")
+    cookie = [h for h in resp.headers.getlist("Set-Cookie") if h.startswith("s4_session=")]
+    assert cookie and "Expires=Thu, 01 Jan 1970" in cookie[0]

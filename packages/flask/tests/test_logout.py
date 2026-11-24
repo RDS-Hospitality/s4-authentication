@@ -18,8 +18,14 @@ def client(make_app, fake_idp):
         return "reports"
 
     client = app.test_client()
+    client.application_ = app
     sign_in(client, fake_idp)
     return client
+
+
+@pytest.fixture
+def app_of():
+    return lambda client: client.application_
 
 
 def logout(client, **headers):
@@ -74,3 +80,34 @@ def test_logout_still_completes_on_network_error(client, idp_mock, config):
     resp = logout(client, Origin=HTTPS)
     assert resp.status_code == 303
     assert "Expires=Thu, 01 Jan 1970" in sid_cookie(resp)
+
+
+def _expired(resp):
+    cookie = sid_cookie(resp)
+    return cookie is not None and "Expires=Thu, 01 Jan 1970" in cookie
+
+
+def test_logout_during_store_outage_is_503_and_expires_cookie(client, app_of, config):
+    inner = app_of(client).session_interface._inner
+
+    def boom(*a, **k):
+        raise RuntimeError("store down")
+
+    inner.open_session = boom
+    resp = logout(client, Origin=HTTPS)
+    assert resp.status_code == 503
+    assert "Location" not in resp.headers
+    assert _expired(resp)
+
+
+def test_logout_when_record_delete_fails_is_503_and_expires_cookie(client, app_of, monkeypatch):
+    inner = app_of(client).session_interface._inner
+
+    def boom(*a, **k):
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(inner, "_delete_session", boom)
+    resp = logout(client, Origin=HTTPS)
+    assert resp.status_code == 503
+    assert "Location" not in resp.headers
+    assert _expired(resp)

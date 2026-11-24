@@ -9,7 +9,7 @@ import requests
 from authlib.integrations.flask_client import OAuth
 from authlib.integrations.base_client import OAuthError
 from cachelib import SimpleCache
-from flask import Blueprint, Flask, abort, current_app, redirect, request, session, url_for
+from flask import Blueprint, Flask, Response, abort, after_this_request, current_app, redirect, request, session, url_for
 from flask.sessions import SessionInterface, SessionMixin
 from flask_session import Session
 from joserfc.errors import JoseError
@@ -37,6 +37,20 @@ _HTTP_TIMEOUT = 10
 
 def _now() -> float:
     return time.time()
+
+
+def _expire_cookie(response: Any) -> Any:
+    app = current_app
+    interface = app.session_interface
+    response.delete_cookie(
+        interface.get_cookie_name(app),
+        domain=interface.get_cookie_domain(app),
+        path=interface.get_cookie_path(app),
+        secure=interface.get_cookie_secure(app),
+        httponly=interface.get_cookie_httponly(app),
+        samesite=interface.get_cookie_samesite(app),
+    )
+    return response
 
 
 def _origin(url: str) -> str:
@@ -125,10 +139,17 @@ class S4Auth:
         Session(app)
         app.session_interface = _FailClosedSessions(app.session_interface)
 
-    def end_session(self) -> None:
-        """Revoke the refresh token (best effort), delete the server record and expire the cookie."""
+    def end_session(self) -> bool:
+        """Revoke the refresh token (best effort), delete the server record and expire the cookie.
+
+        Returns False when the server record could not be deleted (store down); the cookie is
+        still expired and the session is marked unusable so nothing is saved back to it.
+        """
+        interface = current_app.session_interface
+        after_this_request(_expire_cookie)
         if getattr(session, "s4_unusable", False):
-            return
+            _log.error("s4-auth: session store unavailable; could not end the server session")
+            return False
         refresh_token = (session.get(TOKENS) or {}).get("refresh_token")
         if refresh_token:
             try:
@@ -139,12 +160,18 @@ class S4Auth:
                 )
             except Exception:
                 _log.warning("s4-auth: token revocation failed; ending the session anyway")
-        interface = current_app.session_interface
-        # Clearing alone leaves the record until save; a later deny() may write to this session
-        # again, so delete now and move to a fresh id so the old cookie can never match a record.
-        interface._delete_session(interface._get_store_id(session.sid))
+        try:
+            interface._delete_session(interface._get_store_id(session.sid))
+        except Exception:
+            _log.exception("s4-auth: could not delete the server session record")
+            session.clear()
+            session.s4_unusable = True
+            return False
+        # A later deny() may write to this session again, so move to a fresh id so the old
+        # cookie can never match a record.
         session.clear()
         session.sid = interface._generate_sid(interface.sid_length)
+        return True
 
     def enforce_lifetime(self) -> Any:
         """Idle timeout, silent refresh and throttled activity stamp for a signed-in request.
@@ -266,7 +293,8 @@ class S4Auth:
             source = request.headers.get("Origin") or request.headers.get("Referer")
             if not source or _origin(source) != _origin(config.base_url):
                 abort(403)
-            self.end_session()
+            if not self.end_session():
+                return Response("Sign-out could not be completed; try again shortly.", 503)
             return redirect(config.logout_url, 303)
 
         return bp
