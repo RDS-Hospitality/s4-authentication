@@ -141,7 +141,7 @@ run_and_check() {
 
 # --- flask: published on its own, with its own version, via --only. The default set stays
 #     angular+react, so none of the cases above publish it.
-FLASK_VER="0.1.0"
+FLASK_VER="0.0.99"   # test-only: the scratch clone inherits real tags, so never use a real release version
 flask_case() {
   local before_a before_r
   before_a="$(git rev-parse -q --verify refs/heads/angular || echo none)"
