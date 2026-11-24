@@ -33,7 +33,7 @@ def idp_mock(fake_idp, config):
 def make_app(config, idp_mock):
     from flask import Flask, session
 
-    from s4_auth_flask import S4Auth
+    from s4_auth_flask import S4Auth, public
 
     def factory(cfg=None):
         app = Flask(__name__)
@@ -41,10 +41,12 @@ def make_app(config, idp_mock):
         S4Auth(app, cfg or config)
 
         @app.get("/")
+        @public
         def index():
             return "home"
 
         @app.get("/seed")
+        @public
         def seed():
             from flask import request
 
@@ -52,6 +54,7 @@ def make_app(config, idp_mock):
             return "ok"
 
         @app.get("/whoami")
+        @public
         def whoami():
             return {"claims": session.get("s4.claims"), "sid_seen": True}
 

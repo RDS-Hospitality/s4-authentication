@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -8,10 +9,12 @@ from authlib.integrations.flask_client import OAuth
 from authlib.integrations.base_client import OAuthError
 from cachelib import SimpleCache
 from flask import Blueprint, Flask, current_app, redirect, request, session, url_for
+from flask.sessions import SessionInterface, SessionMixin
 from flask_session import Session
 from joserfc.errors import JoseError
 
 from s4_auth_flask.config import AuthConfig
+from s4_auth_flask.guards import guard
 from s4_auth_flask.redirects import safe_return_path
 from s4_auth_flask.tokens import TokenInvalid, verify_id_token
 
@@ -23,6 +26,40 @@ STATE_KEYS = (TOKENS, CLAIMS, RETURN_TO, LAST_ACTIVITY)
 
 # Every way a callback can fail to produce a verified sign-in; all land on a fresh login.
 _CALLBACK_FAILURES = (OAuthError, JoseError, TokenInvalid)
+
+_log = logging.getLogger("s4_auth_flask")
+
+
+class _UnusableSession(dict, SessionMixin):
+    """Stand-in when the session store failed; the guard denies on it and it is never saved."""
+
+    s4_unusable = True
+
+
+class _FailClosedSessions(SessionInterface):
+    """Wraps the real interface so a store failure becomes an unusable session, not a 500.
+
+    Flask opens the session before before_request runs, so a guard cannot catch the error.
+    """
+
+    def __init__(self, inner: SessionInterface) -> None:
+        self._inner = inner
+
+    def open_session(self, app: Flask, req: Any) -> Any:
+        try:
+            return self._inner.open_session(app, req)
+        except Exception:
+            _log.exception("s4-auth: session store failed on open; denying the request")
+            return _UnusableSession()
+
+    def save_session(self, app: Flask, sess: Any, response: Any) -> None:
+        if getattr(sess, "s4_unusable", False):
+            _log.warning("s4-auth: not saving a session whose store failed on open")
+            return None
+        return self._inner.save_session(app, sess, response)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 
 class S4Auth:
@@ -46,6 +83,7 @@ class S4Auth:
         self._configure_sessions(app, config)
         self._register_client(app, config)
         app.register_blueprint(self._blueprint(config), url_prefix="/auth")
+        app.before_request(guard)
         app.extensions["s4_auth"] = self
 
     def _configure_sessions(self, app: Flask, config: AuthConfig) -> None:
@@ -71,6 +109,7 @@ class S4Auth:
         else:
             app.config.update(SESSION_TYPE="cachelib", SESSION_CACHELIB=SimpleCache())
         Session(app)
+        app.session_interface = _FailClosedSessions(app.session_interface)
 
     def _register_client(self, app: Flask, config: AuthConfig) -> None:
         self.oauth = OAuth(app)
