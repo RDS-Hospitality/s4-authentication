@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "s4-auth-flask"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "authlib>=1.9,<2",
+    "joserfc>=1.8,<2",
+    "requests",
+    "flask-session>=0.8,<0.9",
+    "cachelib",
+]
+
+[project.optional-dependencies]
+dynamodb = ["boto3", "mypy-boto3-dynamodb"]
+test = ["pytest", "responses", "moto[dynamodb]", "cryptography", "boto3", "mypy-boto3-dynamodb"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["s4_auth_flask"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow\\(\\) is deprecated:DeprecationWarning:flask_session",
+]

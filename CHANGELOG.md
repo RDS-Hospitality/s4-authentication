@@ -1,7 +1,32 @@
 # Changelog
 
-Releases are tags on the distribution branches: `angular-vX.Y.Z` and `react-vX.Y.Z`.
+Releases are tags on the distribution branches: `angular-vX.Y.Z`, `react-vX.Y.Z` and `flask-vX.Y.Z`.
+The Flask package versions independently of the other two.
 A tag never moves once published; older tags stay installable.
+The release process is in [`RELEASING.md`](./RELEASING.md).
+
+## Unreleased
+
+### s4-auth-flask 0.1.0 (first release; tag `flask-v0.1.0`)
+
+A Flask adapter for server-session apps. Install:
+`pip install "git+https://github.com/RDS-Hospitality/s4-authentication.git@flask-v0.1.0"`
+(add the `[dynamodb]` extra for the DynamoDB session store). See `packages/flask/README-main.md`.
+
+Added
+- `S4Auth`, `AuthConfig.from_env()`, `@public`, `@require_role`, `has_role`, `current_user`,
+  `auth_headers`. Default-deny guard; no setting disables it.
+- Authorization code flow with PKCE (S256), public client, ID-token verification, silent
+  refresh, server-enforced idle timeout, POST-only same-origin logout that revokes the refresh
+  token and deletes the server session.
+- DynamoDB session store (`DYNAMODB_TABLE_SHAPE`: key `id`, TTL attribute `expiration`). The
+  adapter never creates the table or AWS resources.
+- Static conformance checks over the package source.
+
+Standard
+- `STANDARD.md` gains the **Server-session profile (SP)**: how C2, C3, C4, C5, C7 and C9 read
+  for an app whose server holds the tokens. `docs/CONFORMANCE.md` gains the matching S-checks.
+  C1-C9 are unchanged.
 
 ## 0.4.0 — 2026-09 (both packages)
 

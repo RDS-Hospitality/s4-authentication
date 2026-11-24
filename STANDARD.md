@@ -282,6 +282,61 @@ adoption guide MUST gate admin-secret removal on that check.
 
 ---
 
+## Server-session profile (SP)
+
+**Applies when** an application keeps tokens on its server and the browser never
+holds them. Each item below restates one clause's outcome for that arrangement;
+the wording of C1-C9 is unchanged, and an application that keeps tokens in the
+browser ignores this section.
+
+**Rule.**
+- **(C2) Tokens stay server-side.** The server holds the tokens. The browser
+  holds only an opaque session identifier, in a cookie marked `Secure`,
+  `HttpOnly` and `SameSite=Lax` or `SameSite=Strict` (never `None`). The
+  identifier is regenerated at sign-in, so one issued before sign-in never
+  names the signed-in session. Verification of the token is unchanged.
+- **(C3) Idle timeout is server-enforced.** Under this profile the idle timeout
+  (`session.idleTimeout`) is enforced on the server, not the client. The server
+  measures idleness from the session's last activity, recorded at a granularity
+  of one minute or finer. Whether the browser keeps or drops its cookie has no effect on the
+  timeout.
+- **(C4) "Clears all locally stored tokens" means** the server's session record
+  is deleted and the cookie is expired in the browser. A session identifier
+  presented after logout is rejected.
+- **(C5) The callback answers with a redirect.** The sign-in callback responds
+  with a redirect rather than a rendered page, so it never becomes a history
+  entry. Login idempotence is unchanged.
+- **(C7) Requests a guard cannot redirect are refused.** A request the guard
+  cannot answer with a redirect to login (not a GET, or not asking for HTML) is
+  refused with 401. It is never stored as the post-login `returnUrl` and never
+  replayed after sign-in.
+- **(C9) Platform credentials are not data-API secrets.** The application's own
+  platform credentials (for example, the keys the server uses to reach its
+  session store) are not client-bundle secrets. C9 governs calls to per-user
+  data APIs: no data-layer admin secret in source, environment or
+  configuration.
+
+**Why.** C2-C9 were written with a browser holding the tokens. When the server
+holds them, the same outcomes are reached by different observable behavior, and
+a few clauses would otherwise be unanswerable (what is "local storage" when
+there is none; what is a guard's redirect for a form post).
+
+**Conformance test.**
+- No token appears in any `Set-Cookie` or response body.
+- The session cookie carries `Secure`, `HttpOnly` and `SameSite=Lax` or `Strict`, and its value differs before and
+  after sign-in.
+- After the session has been idle for longer than `session.idleTimeout`, the
+  next request demands re-authentication; an expired access token with a valid
+  refresh token does not.
+- After logout the old session identifier is rejected and a protected page
+  demands full re-authentication.
+- The callback is answered by a 3xx.
+- A non-GET or non-HTML request on an expired session gets 401 and is not
+  replayed after sign-in.
+- No data-layer secret appears in source, environment or configuration.
+
+---
+
 ## Config Vocabulary (machine-readable half of the port)
 
 These items are the **stack-agnostic configuration contract**. Each adapter
@@ -301,7 +356,7 @@ CFN `Outputs` (`infra/cognito/`).
 | `postLoginRoute` | Single post-login landing route | C6 |
 | `session.accessTtl` | Access/ID token TTL — **60 min** | C3 |
 | `session.refreshTtl` | Refresh token TTL — **1 d** default (raise per product only with a recorded reason) | C3 |
-| `session.idleTimeout` | Idle logout — **30 min** (client-side; no app-client field) | C3 |
+| `session.idleTimeout` | Idle logout — **30 min** (client-side; no app-client field; server-side under the Server-session profile) | C3 |
 | `graphqlUrls` | Data-API endpoints that receive the bearer token — absolute origins or same-origin path prefixes; empty = none | C9 |
 | `roleClaim` | Claim holding the allowed roles — fleet default `hasura_allowed_roles`, read from the **ID token** | C9 |
 | `defaultRoleClaim` | Claim holding the default role — fleet default `hasura_default_role`, read from the **ID token** | C9 |

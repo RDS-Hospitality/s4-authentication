@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+from urllib.parse import parse_qs
+
+import pytest
+
+from tests.test_flow import sid_cookie
+from tests.test_flow import HTTPS
+from tests.test_guards import HTML, sign_in
+
+
+@pytest.fixture
+def client(make_app, fake_idp):
+    app = make_app()
+
+    @app.get("/reports")
+    def reports():
+        return "reports"
+
+    client = app.test_client()
+    client.application_ = app
+    sign_in(client, fake_idp)
+    return client
+
+
+@pytest.fixture
+def app_of():
+    return lambda client: client.application_
+
+
+def logout(client, **headers):
+    return client.post("/auth/logout", base_url=HTTPS, headers=headers)
+
+
+def test_logout_is_post_only(client):
+    assert client.get("/auth/logout", base_url=HTTPS).status_code == 405
+
+
+def test_cross_origin_logout_is_refused(client):
+    assert logout(client, Origin="https://evil.com").status_code == 403
+    assert client.get("/reports", base_url=HTTPS).status_code == 200
+
+
+def test_cross_origin_referer_is_refused(client):
+    assert logout(client, Referer="https://evil.com/x").status_code == 403
+
+
+def test_logout_without_origin_or_referer_is_refused(client):
+    assert logout(client).status_code == 403
+
+
+def test_logout_revokes_clears_and_redirects(client, fake_idp, config):
+    old_cookie = client.get_cookie("s4_session").value
+    resp = logout(client, Origin=HTTPS)
+    assert resp.status_code == 303
+    assert resp.headers["Location"] == config.logout_url
+    body = parse_qs(fake_idp.revoke_requests[0].body)
+    assert body["token"] == ["refresh-secret-value"]
+    assert body["client_id"] == [config.client_id]
+    assert "Expires=Thu, 01 Jan 1970" in sid_cookie(resp)
+    client.set_cookie("s4_session", old_cookie, domain="localhost")
+    replay = client.get("/reports", base_url=HTTPS, headers=HTML)
+    assert replay.status_code == 302
+    assert replay.headers["Location"].endswith("/auth/login")
+
+
+def test_logout_accepts_same_origin_referer(client):
+    assert logout(client, Referer=HTTPS + "/reports").status_code == 303
+
+
+def test_logout_still_completes_when_revoke_fails(client, idp_mock, config):
+    idp_mock.replace(idp_mock.POST, config.revoke_url, status=500)
+    resp = logout(client, Origin=HTTPS)
+    assert resp.status_code == 303
+    assert "Expires=Thu, 01 Jan 1970" in sid_cookie(resp)
+
+
+def test_logout_still_completes_on_network_error(client, idp_mock, config):
+    idp_mock.replace(idp_mock.POST, config.revoke_url, body=ConnectionError("down"))
+    resp = logout(client, Origin=HTTPS)
+    assert resp.status_code == 303
+    assert "Expires=Thu, 01 Jan 1970" in sid_cookie(resp)
+
+
+def _expired(resp):
+    cookie = sid_cookie(resp)
+    return cookie is not None and "Expires=Thu, 01 Jan 1970" in cookie
+
+
+def test_logout_during_store_outage_is_503_and_expires_cookie(client, app_of, config):
+    inner = app_of(client).session_interface._inner
+
+    def boom(*a, **k):
+        raise RuntimeError("store down")
+
+    inner.open_session = boom
+    resp = logout(client, Origin=HTTPS)
+    assert resp.status_code == 503
+    assert "Location" not in resp.headers
+    assert _expired(resp)
+
+
+def test_logout_when_record_delete_fails_is_503_and_expires_cookie(client, app_of, monkeypatch):
+    inner = app_of(client).session_interface._inner
+
+    def boom(*a, **k):
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(inner, "_delete_session", boom)
+    resp = logout(client, Origin=HTTPS)
+    assert resp.status_code == 503
+    assert "Location" not in resp.headers
+    assert _expired(resp)
+
+
+def test_signed_out_page_is_public_and_links_to_login(make_app):
+    client = make_app().test_client()
+    resp = client.get("/auth/signed-out", base_url=HTTPS)
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "You are signed out." in body
+    assert 'href="/auth/login"' in body
+    assert "Location" not in resp.headers
+    assert sid_cookie(resp) is None

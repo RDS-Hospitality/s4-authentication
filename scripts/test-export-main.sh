@@ -20,7 +20,7 @@ git checkout --quiet "$(cd "$REPO_ROOT" && git rev-parse --abbrev-ref HEAD)"
 # The clone only contains COMMITTED files. Copy the working-tree scripts/manifests
 # from the real repo so TDD can exercise uncommitted versions.
 mkdir -p "$SCRATCH/repo/scripts" "$SCRATCH/repo/packages/angular/scripts" \
-         "$SCRATCH/repo/packages/react/scripts"
+         "$SCRATCH/repo/packages/react/scripts" "$SCRATCH/repo/packages/flask/scripts"
 cp "$HERE/export-main.sh" "$HERE/test-export-main.sh" "$SCRATCH/repo/scripts/"
 cp "$REPO_ROOT/scripts/curated-manifest-root.txt"            "$SCRATCH/repo/scripts/"
 cp "$REPO_ROOT/packages/angular/scripts/export.sh"           "$SCRATCH/repo/packages/angular/scripts/"
@@ -28,11 +28,17 @@ cp "$REPO_ROOT/packages/angular/scripts/curated-manifest.txt" "$SCRATCH/repo/pac
 cp "$REPO_ROOT/packages/angular/README-main.md"              "$SCRATCH/repo/packages/angular/"
 cp "$REPO_ROOT/packages/react/scripts/export.sh"             "$SCRATCH/repo/packages/react/scripts/"
 cp "$REPO_ROOT/packages/react/README-main.md"                "$SCRATCH/repo/packages/react/"
+cp "$REPO_ROOT/packages/flask/scripts/export.sh"             "$SCRATCH/repo/packages/flask/scripts/"
+cp "$REPO_ROOT/packages/flask/scripts/curated-manifest.txt"  "$SCRATCH/repo/packages/flask/scripts/"
+cp "$REPO_ROOT/packages/flask/README-main.md"                "$SCRATCH/repo/packages/flask/"
 # react export.sh now BUILDS the CLI from the clone's committed packages/react/cli/ source
 # (npm ci && npm run build); the clone has that source + lockfile, so no extra copy is needed.
 
+# FLASK_ONLY=1 runs just the flask case (no npm ci / angular / react builds).
+FLASK_ONLY="${FLASK_ONLY:-}"
+
 # The clone has no node_modules (gitignored) — install so Angular's `npm run build` works.
-( cd "$SCRATCH/repo/packages/angular" && npm ci --silent )
+[[ -n "$FLASK_ONLY" ]] || ( cd "$SCRATCH/repo/packages/angular" && npm ci --silent )
 
 # assert path EXISTS on a branch's tree
 have() { git cat-file -e "$1:$2" 2>/dev/null; }
@@ -133,6 +139,59 @@ run_and_check() {
   echo "  run check OK (two flat-root orphans + tags, version stamped, no leaks)"
 }
 
+# --- flask: published on its own, with its own version, via --only. The default set stays
+#     angular+react, so none of the cases above publish it.
+FLASK_VER="0.0.99"   # test-only: the scratch clone inherits real tags, so never use a real release version
+flask_case() {
+  local before_a before_r
+  before_a="$(git rev-parse -q --verify refs/heads/angular || echo none)"
+  before_r="$(git rev-parse -q --verify refs/heads/react || echo none)"
+
+  bash scripts/export-main.sh --only flask --version "$FLASK_VER"
+
+  check_orphan flask
+  for p in pyproject.toml README.md STANDARD.md infra/cognito/template.yaml \
+           s4_auth_flask/__init__.py s4_auth_flask/extension.py; do
+    have flask "$p" || { echo "FAIL: flask missing $p"; exit 1; }
+  done
+  for p in tests .venv .pytest_cache uv.lock packages docs README-main.md; do
+    absent flask "$p" || { echo "FAIL: flask branch leaked $p"; exit 1; }
+  done
+  [[ -z "$(git ls-tree -r --name-only flask | grep -E '__pycache__|\.pyc$' || true)" ]] \
+    || { echo "FAIL: flask branch ships bytecode"; exit 1; }
+  git show flask:pyproject.toml | grep -qx "version = \"$FLASK_VER\"" \
+    || { echo "FAIL: flask pyproject.toml missing version $FLASK_VER"; exit 1; }
+  git show flask:README.md | grep -q 's4-auth-flask' \
+    || { echo "FAIL: flask README.md is not the Flask framework README"; exit 1; }
+
+  local tag="flask-v${FLASK_VER}"
+  [[ "$(git cat-file -t "$tag")" == "tag" ]] || { echo "FAIL: $tag is not an annotated tag"; exit 1; }
+  [[ "$(git rev-parse "${tag}^{commit}")" == "$(git rev-parse flask)" ]] \
+    || { echo "FAIL: $tag does not point at the flask tip"; exit 1; }
+
+  [[ "$(git rev-parse -q --verify refs/heads/angular || echo none)" == "$before_a" \
+     && "$(git rev-parse -q --verify refs/heads/react || echo none)" == "$before_r" ]] \
+    || { echo "FAIL: --only flask moved the angular/react refs"; exit 1; }
+
+  # The branch must be pip-installable from its root and expose the public entry point.
+  local WORK; WORK="$(mktemp -d)"
+  mkdir "$WORK/checkout"
+  git archive flask | tar -x -C "$WORK/checkout"
+  uv venv --quiet "$WORK/venv"
+  uv pip install --quiet --python "$WORK/venv/bin/python" "$WORK/checkout" \
+    || { echo "FAIL: uv pip install of the flask branch failed"; exit 1; }
+  "$WORK/venv/bin/python" -c "import s4_auth_flask; s4_auth_flask.S4Auth" \
+    || { echo "FAIL: installed flask branch does not expose s4_auth_flask.S4Auth"; exit 1; }
+  rm -rf "$WORK"
+  echo "  flask check OK (flat-root orphan, version stamped, no tests/, installs, other refs untouched)"
+}
+
+if [[ -n "$FLASK_ONLY" ]]; then
+  flask_case
+  echo "PASS (flask only)"
+  exit 0
+fi
+
 run_and_check          # first release
 TAG_A1="$(git rev-parse "angular-v${VER}")"; TAG_R1="$(git rev-parse "react-v${VER}")"
 run_and_check          # SECOND run must also succeed (re-runnability)
@@ -165,10 +224,12 @@ fi
 grep -qi "semver" "$SCRATCH/semver.out" || { echo "FAIL: version rejection did not mention semver"; cat "$SCRATCH/semver.out"; exit 1; }
 echo "  version-format check OK"
 
+flask_case
+
 # After exercising the export twice, no temp worktrees/branches may dangle.
-[[ -z "$(git worktree list --porcelain | grep -iE 'export-(angular|react)' || true)" ]] \
+[[ -z "$(git worktree list --porcelain | grep -iE 'export-(angular|react|flask)' || true)" ]] \
   || { echo "FAIL: dangling export worktree left behind"; git worktree list; exit 1; }
-[[ -z "$(git branch --list 'export-angular-tmp-*' 'export-react-tmp-*')" ]] \
+[[ -z "$(git branch --list 'export-angular-tmp-*' 'export-react-tmp-*' 'export-flask-tmp-*')" ]] \
   || { echo "FAIL: dangling temp branch left behind"; git branch --list 'export-*-tmp-*'; exit 1; }
 
 echo "PASS"

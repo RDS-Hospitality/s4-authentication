@@ -1,0 +1,10 @@
+# curated-manifest.txt — Flask package payload staged at the ROOT of the flask distribution
+# branch by export.sh.
+# Format: <source-path-relative-to-repo-root>  ->  <dest-path-relative-to-$TARGET>
+# Lines starting with # and blank lines are ignored.
+# tests/, .venv/, uv.lock and caches are deliberately absent: only what a consumer installs ships.
+# Shared root files (STANDARD.md, infra/cognito/) live in scripts/curated-manifest-root.txt.
+
+packages/flask/pyproject.toml     -> pyproject.toml
+packages/flask/README-main.md     -> README.md
+packages/flask/s4_auth_flask      -> s4_auth_flask

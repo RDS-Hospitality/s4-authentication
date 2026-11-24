@@ -231,6 +231,29 @@ it is a new sibling adapter under `reference/<stack>/`.)*
 
 ---
 
+## 5a. Flask (server-session apps)
+
+A Flask app does not use the Angular adapter. It installs `s4-auth-flask`, which keeps the
+tokens on the server and gives the browser only an opaque session cookie. It conforms to the
+Contract through the "Server-session profile" in `STANDARD.md`.
+
+Follow `packages/flask/README-main.md` (the `README.md` of the `flask` distribution branch). It
+covers the install, the ten-line integration, the `S4_AUTH_*` settings, the DynamoDB session
+table, and the four AWS steps per app:
+
+1. An app client: Google, authorization code flow, no client secret, scopes
+   `openid email profile`, tokens valid 60 min / 60 min / 1 day, callback
+   `{base_url}/auth/callback`, sign-out URL `{base_url}/auth/signed-out`.
+2. An entry for the client id in the pool's inbound-federation domain-gate allowlist. Without
+   it sign-in is refused.
+3. If the app uses roles: the client in the role Lambda's claims-emission set, plus a Cognito
+   group per role.
+4. The session table.
+
+Then verify with `docs/CONFORMANCE.md`, using the Server-session profile checks.
+
+---
+
 ## 6. Verify conformance
 
 Run `docs/CONFORMANCE.md` against your app: 🔍 static greps, ⚙️ app-client/config
