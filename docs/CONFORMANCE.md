@@ -147,6 +147,35 @@ Each check cites its clause. Checks are typed:
 
 ---
 
+## Server-session profile
+
+Applies to an application that keeps tokens on its server (see "Server-session
+profile (SP)" in `/STANDARD.md`). Each check names the clause it restates.
+
+- [ ] **S2.1** 👁 (C2) No token appears in any `Set-Cookie` header or response
+      body, across sign-in, an authenticated page, and logout. Inspect the
+      network tab; search each response for the ID, access and refresh token
+      values.
+- [ ] **S2.2** 👁/🔍 (C2) The session cookie carries `Secure`, `HttpOnly` and
+      `SameSite` (👁: devtools Application tab, or `curl -i` on the callback
+      response; 🔍: the flags are set in the adapter's cookie configuration).
+      The cookie value after sign-in differs from the value before it.
+- [ ] **S3.1** 👁 (C3) Idle for 31 minutes, then request a protected page:
+      full re-authentication is demanded.
+- [ ] **S3.2** 👁 (C3) With the access token expired and the refresh token still
+      valid, the next request succeeds without a login redirect.
+- [ ] **S4.1** 👁 (C4) After logout, replaying the old session identifier is
+      rejected, and a protected page demands full re-authentication.
+- [ ] **S5.1** 👁 (C5) The callback is answered by a 3xx redirect, never a 200
+      with a body (`curl -i` on the callback URL).
+- [ ] **S7.1** 👁 (C7) A POST sent on an expired session returns 401, and the
+      request is not replayed or stored as `returnUrl` after the user signs in.
+- [ ] **S9.1** 🔍 (C9) No data-layer secret in source, environment or
+      configuration; same grep as C9.1, run over the adapter's source and
+      config files.
+
+---
+
 ## Scoring
 
 ### Known limitation of the 🔍 greps
