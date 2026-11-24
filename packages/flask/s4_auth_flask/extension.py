@@ -5,6 +5,8 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+from markupsafe import escape
+
 import requests
 from authlib.integrations.flask_client import OAuth
 from authlib.integrations.base_client import OAuthError
@@ -286,6 +288,8 @@ class S4Auth:
         @bp.get("/login")
         @adapter_view
         def login() -> Any:
+            if getattr(session, "s4_unusable", False):
+                return _unavailable()
             if signed_in():
                 return landing(session.get(RETURN_TO))
             extra = {}
@@ -296,12 +300,21 @@ class S4Auth:
         @bp.get("/callback")
         @adapter_view
         def callback() -> Any:
+            if getattr(session, "s4_unusable", False):
+                return _unavailable()
+            if request.args.get("error"):
+                # The IdP refused the user; sending them back to the IdP would loop.
+                reason = request.args.get("error_description") or request.args["error"]
+                return _page(401, "Sign-in was refused", escape(reason), _login_url())
             return_to = session.get(RETURN_TO)
             try:
                 token = client.authorize_access_token()
                 claims = verify_id_token(
                     token["id_token"], config=config, jwks=client.fetch_jwk_set()
                 )
+            except requests.RequestException:
+                _log.warning("s4-auth: identity provider unreachable at callback")
+                return _unavailable()
             except (*_CALLBACK_FAILURES, KeyError):
                 for key in STATE_KEYS:
                     session.pop(key, None)
@@ -331,6 +344,20 @@ class S4Auth:
             return redirect(config.logout_url, 303)
 
         return bp
+
+
+def _page(status: int, title: str, detail: Any, link: str) -> Response:
+    body = (
+        f"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>{title}</title></head>"
+        f"<body><h1>{title}</h1><p>{detail}</p><p><a href=\"{link}\">Try again</a></p></body></html>"
+    )
+    return Response(body, status, mimetype="text/html")
+
+
+def _unavailable() -> Response:
+    return _page(
+        503, "Sign-in is temporarily unavailable", "Please try again in a moment.", _login_url()
+    )
 
 
 def _mounted(path: str) -> str:
