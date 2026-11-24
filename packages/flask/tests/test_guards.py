@@ -234,3 +234,27 @@ def test_auth_headers_only_for_allowlisted_urls(make_app, fake_idp, config):
             assert body["Authorization"].count(".") == 2
         else:
             assert body == {}
+
+
+def test_view_under_adapter_endpoint_name_is_still_denied(app):
+    app.add_url_rule(
+        "/sneaky", endpoint="s4_auth.sneaky", view_func=lambda: "sneaky-body"
+    )
+    resp = app.test_client().get("/sneaky", base_url=HTTPS, headers=HTML)
+    assert resp.status_code == 302
+    assert b"sneaky-body" not in resp.data
+
+
+@pytest.mark.parametrize(
+    "bad", [{}, "a-string", ["x"], 7, {"email": "a@b.c"}, {"sub": ""}, {"sub": "  "}]
+)
+def test_malformed_claims_are_not_signed_in(app, bad):
+    client = app.test_client()
+    with client.session_transaction(base_url=HTTPS) as s:
+        s["s4.claims"] = bad
+    resp = client.get("/reports", base_url=HTTPS, headers=HTML)
+    assert resp.status_code == 302
+    assert b"reports" not in resp.data
+    login = client.get("/auth/login", base_url=HTTPS)
+    assert login.status_code == 302
+    assert "/oauth2/authorize" in login.headers["Location"]

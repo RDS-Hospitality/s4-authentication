@@ -14,7 +14,7 @@ from flask_session import Session
 from joserfc.errors import JoseError
 
 from s4_auth_flask.config import AuthConfig
-from s4_auth_flask.guards import guard
+from s4_auth_flask.guards import adapter_view, guard, signed_in
 from s4_auth_flask.redirects import safe_return_path
 from s4_auth_flask.tokens import TokenInvalid, verify_id_token
 
@@ -128,14 +128,12 @@ class S4Auth:
         bp = Blueprint("s4_auth", __name__)
         client = self.oauth.s4
 
-        def signed_in() -> bool:
-            return CLAIMS in session
-
         def landing(return_to: str | None) -> Any:
             target = safe_return_path(return_to, request.script_root)
             return redirect(target or _mounted(config.post_login_route), 303)
 
         @bp.get("/login")
+        @adapter_view
         def login() -> Any:
             if signed_in():
                 return landing(session.get(RETURN_TO))
@@ -145,6 +143,7 @@ class S4Auth:
             return client.authorize_redirect(config.callback_url, **extra)
 
         @bp.get("/callback")
+        @adapter_view
         def callback() -> Any:
             return_to = session.get(RETURN_TO)
             try:

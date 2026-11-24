@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
 from flask import Response, abort, current_app, redirect, request, session, url_for
@@ -11,7 +11,7 @@ from s4_auth_flask.roles import has_any_role, read_roles, warn_if_no_role_claim
 from s4_auth_flask.url_allowlist import matches_allowlist
 
 _PUBLIC_ATTR = "_s4_public"
-_ADAPTER_BLUEPRINT = "s4_auth"
+_ADAPTER_ATTR = "_s4_adapter_view"
 _log = logging.getLogger("s4_auth_flask")
 
 
@@ -29,12 +29,29 @@ def _auth():
     return current_app.extensions["s4_auth"]
 
 
-def _claims() -> dict | None:
+def adapter_view(view: Callable) -> Callable:
+    """Mark a view the adapter itself registered; only these are exempt by identity."""
+    setattr(view, _ADAPTER_ATTR, True)
+    return view
+
+
+def _claims() -> Mapping | None:
+    """Verified claims of the signed-in user, or None. The one definition of "signed in"."""
     if getattr(session, "s4_unusable", False):
         return None
     from s4_auth_flask.extension import CLAIMS
 
-    return session.get(CLAIMS)
+    claims = session.get(CLAIMS)
+    if not isinstance(claims, Mapping):
+        return None
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub.strip():
+        return None
+    return claims
+
+
+def signed_in() -> bool:
+    return _claims() is not None
 
 
 def _tokens() -> dict:
@@ -47,10 +64,12 @@ def _is_exempt() -> bool:
     endpoint = request.endpoint
     if endpoint is None:
         return True  # no view will run: 404/405 handling
-    if request.blueprint == _ADAPTER_BLUEPRINT or endpoint == "static":
+    if endpoint == "static":
         return True
     view = current_app.view_functions.get(endpoint)
-    return bool(getattr(view, _PUBLIC_ATTR, False))
+    # Identity, not endpoint name: Werkzeug derives request.blueprint from the name prefix,
+    # so an app view registered as "s4_auth.x" must not inherit the adapter's exemption.
+    return bool(getattr(view, _PUBLIC_ATTR, False) or getattr(view, _ADAPTER_ATTR, False))
 
 
 def deny() -> Response:
