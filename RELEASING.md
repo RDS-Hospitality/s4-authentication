@@ -43,6 +43,10 @@ Replace `<fw>` with `angular`, `react` or `flask` and `X.Y.Z` with the new versi
 7. Verify with `git ls-remote --tags origin` that the new tag is there and that every older tag
    still resolves to the commit it pointed at before.
 
+A release that changes the auth boundary (a new adapter, or session, guard or logout behaviour) is
+tagged only after the adapter's behavioural checks pass on its validation host (for Flask:
+`packages/flask/validation-host/README.md`).
+
 What the script guarantees:
 
 - It writes refs only after every requested framework has built cleanly; a refusal leaves no refs changed.

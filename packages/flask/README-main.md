@@ -76,12 +76,12 @@ the same fields.
 | `S4_AUTH_BASE_URL` | yes | | Public URL of the app, including any mount path. `https://` only (`http://localhost` and `http://127.0.0.1` are allowed for local runs). |
 | `S4_AUTH_SCOPES` | | `openid,email,profile` | Comma-separated. Must include the three defaults. |
 | `S4_AUTH_POST_LOGIN_ROUTE` | | `/` | Landing page when there is no return path. Must start with a single `/`. |
-| `S4_AUTH_ACCESS_TTL` | | 60 | Minutes. Mirrors the app client's access-token validity. |
+| `S4_AUTH_ACCESS_TTL` | | 60 | Minutes. Caps how long the adapter trusts an access token before refreshing (together with the token's own expiry); mirror the app client's access-token validity. |
 | `S4_AUTH_REFRESH_TTL` | | 1 day | Minutes. Mirrors the app client's refresh-token validity; also the cookie lifetime. |
 | `S4_AUTH_IDLE_TIMEOUT` | | 30 | Minutes without a request before the server ends the session. |
 | `S4_AUTH_GRAPHQL_URLS` | | none | Comma-separated data-layer URLs that `auth_headers()` may attach the token to. |
 | `S4_AUTH_ROLE_CLAIM` | | `hasura_allowed_roles` | ID-token claim holding the user's roles. |
-| `S4_AUTH_DEFAULT_ROLE_CLAIM` | | `hasura_default_role` | ID-token claim holding the default role. Accepted for parity with the other adapters; no guard reads it yet. |
+| `S4_AUTH_DEFAULT_ROLE_CLAIM` | | `hasura_default_role` | ID-token claim holding the default role. `current_user()` reports it as `default_role`. |
 | `S4_AUTH_SESSION_BACKEND` | | `dynamodb` | `dynamodb`, or `memory` (one process only; development). |
 | `S4_AUTH_SESSION_TABLE` | | `s4-auth-sessions` | DynamoDB table name. |
 | `S4_AUTH_COOKIE_NAME` | | `s4_session` | Session cookie name. |
@@ -90,11 +90,14 @@ The cookie is always `Secure`, `HttpOnly`, `SameSite=Lax`.
 
 ## Using the guards
 
-- `@public` exempts a view. Put it above the route decorator, as in the example.
+- `@public` exempts a view. It marks the function that gets registered, so it works above or
+  below the route decorator; if you stack your own decorators that do not use
+  `functools.wraps`, apply `@public` to the function that ends up registered.
 - `@require_role("admin")` or `@require_role(["admin", "editor"])` allows a user holding any
   listed role, otherwise 403. An empty requirement raises `ValueError` when the view is defined.
 - `has_role(...)` is the same test as a function, for use inside a view.
-- `current_user()` returns the verified ID-token claims plus `roles`, or `None`.
+- `current_user()` returns the verified ID-token claims plus `roles` and `default_role` (from
+  `S4_AUTH_DEFAULT_ROLE_CLAIM`), or `None`.
 - `auth_headers(url)` returns `{"Authorization": "Bearer <ID token>"}` only when `url` matches
   an entry in `S4_AUTH_GRAPHQL_URLS`, otherwise `{}`. An entry is an absolute URL (origin plus
   optional path prefix) or a path prefix starting with `/` (matched against the app's own
@@ -109,6 +112,9 @@ The cookie is always `Secure`, `HttpOnly`, `SameSite=Lax`.
   out and then treated as above.
 - Logout accepts **POST only**, and only when `Origin` (or `Referer`) matches `base_url`;
   otherwise 403. Use a form button, not a link.
+- Guarded responses carry `Cache-Control: no-store`. A guarded **POST, PUT, PATCH or DELETE**
+  must carry an `Origin` (or `Referer`) equal to `base_url`'s origin, otherwise 403 before the
+  view runs; plain HTML forms and `fetch` send it automatically. Nothing disables this.
 - **Session-store outage:** requests are denied, logout returns **503**, and a failed save of
   the session returns **500**. The adapter fails closed.
 
@@ -127,6 +133,14 @@ The same values are in `s4_auth_flask.extension.DYNAMODB_TABLE_SHAPE`
 TTL is housekeeping only, so expired rows eventually disappear. Session lifetime is enforced
 by the adapter (idle timeout) and by Cognito refusing the refresh token after its lifetime.
 The app's role needs `dynamodb:GetItem`, `UpdateItem` and `DeleteItem` on the table.
+
+Two behaviours of the store to know about:
+
+- Flask-Session's DynamoDB reads are eventually consistent. A user who has just signed in can,
+  rarely, be asked to sign in again if their next request reads from a lagging replica.
+- Concurrent requests write the session record last-writer-wins. If the app client enables
+  Cognito refresh-token rotation, configure its grace period so a refresh lost to a concurrent
+  write does not strand the session.
 
 ## AWS setup per app
 

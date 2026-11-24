@@ -101,3 +101,23 @@ def test_guard_runs_before_earlier_registered_before_request_hooks(config, idp_m
 def test_post_login_route_rejects_unsafe_values(config, route):
     with pytest.raises(ValueError):
         replace(config, post_login_route=route)
+
+
+def test_public_marker_works_above_or_below_the_route_decorator(make_app):
+    from s4_auth_flask import public
+
+    app = make_app()
+
+    @public
+    @app.get("/above")
+    def above():
+        return "above"
+
+    @app.get("/below")
+    @public
+    def below():
+        return "below"
+
+    client = app.test_client()
+    assert client.get("/above", base_url=HTTPS).status_code == 200
+    assert client.get("/below", base_url=HTTPS).status_code == 200

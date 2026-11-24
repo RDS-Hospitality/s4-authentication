@@ -8,7 +8,9 @@
 #
 # Usage: export-main.ps1 [-Version X.Y.Z] [-Only angular|react|flask]
 #
-# SAFETY INVARIANT: the only mutation to a real ref is `git branch -f main` inside export-main.sh.
+# SAFETY INVARIANT: the only mutations to real refs are the per-framework `git branch -f <fw>`
+# (angular, react, flask) and the optional annotated tag <fw>-vX.Y.Z, both inside export-main.sh.
+# `main` is never touched.
 [CmdletBinding()]
 param(
   [string]$Version,
