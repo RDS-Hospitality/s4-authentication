@@ -5,16 +5,17 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+import requests
 from authlib.integrations.flask_client import OAuth
 from authlib.integrations.base_client import OAuthError
 from cachelib import SimpleCache
-from flask import Blueprint, Flask, current_app, redirect, request, session, url_for
+from flask import Blueprint, Flask, abort, current_app, redirect, request, session, url_for
 from flask.sessions import SessionInterface, SessionMixin
 from flask_session import Session
 from joserfc.errors import JoseError
 
 from s4_auth_flask.config import AuthConfig
-from s4_auth_flask.guards import adapter_view, guard, signed_in
+from s4_auth_flask.guards import adapter_view, deny, guard, signed_in
 from s4_auth_flask.redirects import safe_return_path
 from s4_auth_flask.tokens import TokenInvalid, verify_id_token
 
@@ -28,6 +29,19 @@ STATE_KEYS = (TOKENS, CLAIMS, RETURN_TO, LAST_ACTIVITY)
 _CALLBACK_FAILURES = (OAuthError, JoseError, TokenInvalid)
 
 _log = logging.getLogger("s4_auth_flask")
+
+_ACTIVITY_WRITE_INTERVAL = 60
+_REFRESH_SKEW = 60
+_HTTP_TIMEOUT = 10
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 class _UnusableSession(dict, SessionMixin):
@@ -111,6 +125,83 @@ class S4Auth:
         Session(app)
         app.session_interface = _FailClosedSessions(app.session_interface)
 
+    def end_session(self) -> None:
+        """Revoke the refresh token (best effort), delete the server record and expire the cookie."""
+        if getattr(session, "s4_unusable", False):
+            return
+        refresh_token = (session.get(TOKENS) or {}).get("refresh_token")
+        if refresh_token:
+            try:
+                requests.post(
+                    self.config.revoke_url,
+                    data={"token": refresh_token, "client_id": self.config.client_id},
+                    timeout=_HTTP_TIMEOUT,
+                )
+            except Exception:
+                _log.warning("s4-auth: token revocation failed; ending the session anyway")
+        interface = current_app.session_interface
+        # Clearing alone leaves the record until save; a later deny() may write to this session
+        # again, so delete now and move to a fresh id so the old cookie can never match a record.
+        interface._delete_session(interface._get_store_id(session.sid))
+        session.clear()
+        session.sid = interface._generate_sid(interface.sid_length)
+
+    def enforce_lifetime(self) -> Any:
+        """Idle timeout, silent refresh and throttled activity stamp for a signed-in request.
+
+        Returns a deny response when the session had to end, otherwise None.
+        """
+        now = _now()
+        last = session.get(LAST_ACTIVITY)
+        if not isinstance(last, (int, float)) or now - last > self.config.idle_timeout.total_seconds():
+            self.end_session()
+            return deny()
+        expires_at = (session.get(TOKENS) or {}).get("expires_at")
+        if not isinstance(expires_at, (int, float)) or now >= expires_at - _REFRESH_SKEW:
+            if not self._refresh(now):
+                self.end_session()
+                return deny()
+        if now - last >= _ACTIVITY_WRITE_INTERVAL:
+            session[LAST_ACTIVITY] = now
+        return None
+
+    def _refresh(self, now: float) -> bool:
+        tokens = session.get(TOKENS) or {}
+        refresh_token = tokens.get("refresh_token")
+        if not refresh_token:
+            return False
+        client = self.oauth.s4
+        try:
+            endpoint = client.load_server_metadata()["token_endpoint"]
+            resp = requests.post(
+                endpoint,
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self.config.client_id,
+                    "refresh_token": refresh_token,
+                },
+                timeout=_HTTP_TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return False
+            body = resp.json()
+            claims = verify_id_token(
+                body["id_token"], config=self.config, jwks=client.fetch_jwk_set()
+            )
+        except (*_CALLBACK_FAILURES, requests.RequestException, KeyError, ValueError):
+            _log.warning("s4-auth: token refresh failed; ending the session")
+            return False
+        expires_in = body.get("expires_in") or self.config.access_ttl.total_seconds()
+        session[TOKENS] = {
+            "id_token": body["id_token"],
+            "access_token": body.get("access_token"),
+            # Cognito's refresh reply carries no new refresh token; keep the one we hold.
+            "refresh_token": body.get("refresh_token") or refresh_token,
+            "expires_at": now + expires_in,
+        }
+        session[CLAIMS] = claims
+        return True
+
     def _register_client(self, app: Flask, config: AuthConfig) -> None:
         self.oauth = OAuth(app)
         self.oauth.register(
@@ -163,9 +254,20 @@ class S4Auth:
                 "expires_at": token.get("expires_at"),
             }
             session[CLAIMS] = claims
-            session[LAST_ACTIVITY] = time.time()
+            session[LAST_ACTIVITY] = _now()
             current_app.session_interface.regenerate(session)
             return landing(return_to)
+
+        @bp.post("/logout")
+        @adapter_view
+        def logout() -> Any:
+            # Exempt from the guard so an expired session can still log out; the origin check
+            # is the CSRF defence, and a request carrying neither header is refused.
+            source = request.headers.get("Origin") or request.headers.get("Referer")
+            if not source or _origin(source) != _origin(config.base_url):
+                abort(403)
+            self.end_session()
+            return redirect(config.logout_url, 303)
 
         return bp
 

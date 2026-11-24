@@ -99,7 +99,7 @@ def guard() -> Response | None:
     if claims is None:
         return deny()
     warn_if_no_role_claim(claims, _auth().config.role_claim, _warn)
-    return None
+    return _auth().enforce_lifetime()
 
 
 def current_roles() -> list[str]:
