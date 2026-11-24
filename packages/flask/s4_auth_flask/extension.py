@@ -32,7 +32,14 @@ _log = logging.getLogger("s4_auth_flask")
 
 # Mirrors what Flask-Session's DynamoDB interface reads and writes (dynamodb.py: KeySchema "id",
 # TTL "expiration"); the adapter never creates the table, so setup docs quote this.
-DYNAMODB_TABLE_SHAPE = {"partition_key": "id", "key_type": "S", "ttl_attribute": "expiration"}
+# The table must have TTL enabled on `expiration`; the adapter never enables it (housekeeping only,
+# lifetime is enforced by the idle timeout and Cognito's refresh-token expiry).
+DYNAMODB_TABLE_SHAPE = {
+    "partition_key": "id",
+    "key_type": "S",
+    "ttl_attribute": "expiration",
+    "ttl_enabled": True,
+}
 
 _ACTIVITY_WRITE_INTERVAL = 60
 _REFRESH_SKEW = 60
@@ -108,12 +115,9 @@ class _FailClosedSessions(SessionInterface):
         if getattr(sess, "s4_unusable", False):
             _log.warning("s4-auth: not saving a session whose store failed on open")
             return None
-        try:
-            return self._inner.save_session(app, sess, response)
-        except Exception:
-            # The session is lost, so the next request has no sign-in and is denied.
-            _log.exception("s4-auth: session store failed on save; the session was not persisted")
-            return None
+        # A failed write must surface as a 500: swallowing it would send a user who just
+        # signed in back through the login redirect with no cookie and no visible error.
+        return self._inner.save_session(app, sess, response)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)

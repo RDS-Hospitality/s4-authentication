@@ -11,7 +11,7 @@ from moto import mock_aws
 from s4_auth_flask import S4Auth, public
 from s4_auth_flask.config import AuthConfig
 from s4_auth_flask.extension import DYNAMODB_TABLE_SHAPE
-from tests.test_flow import HTTPS
+from tests.test_flow import HTTPS, finish_login, start_login
 from tests.test_guards import HTML, sign_in
 
 TABLE = "s4-auth-sessions"
@@ -92,6 +92,7 @@ def test_logout_on_one_instance_ends_it_on_the_other(two_apps, fake_idp):
 def test_adapter_never_creates_the_table(aws, ddb_config, idp_mock):
     app = build_app(ddb_config, aws)
     client = app.test_client()
+    client.set_cookie("s4_session", "some-old-session-id", domain="localhost")
     assert client.get("/reports", base_url=HTTPS, headers=HTML).status_code in (302, 401)
     assert client.get("/reports", base_url=HTTPS).status_code in (302, 401)
     assert aws.meta.client.list_tables()["TableNames"] == []
@@ -112,3 +113,31 @@ def test_session_item_holds_no_cookie_visible_token(two_apps, aws, fake_idp, ddb
         assert cookie not in token
     ttl = float(item[DYNAMODB_TABLE_SHAPE["ttl_attribute"]])
     assert time.time() < ttl <= time.time() + ddb_config.refresh_ttl.total_seconds() + 5
+
+
+def test_failed_session_write_at_callback_is_a_server_error(two_apps, fake_idp, monkeypatch):
+    app = two_apps[0]
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    client = app.test_client()
+    _, q = start_login(client)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(app.session_interface._inner, "_upsert_session", boom)
+    resp, _ = finish_login(client, fake_idp, q, id_token=fake_idp.id_token(nonce=q["nonce"]))
+    assert resp.status_code >= 500
+    assert "Location" not in resp.headers
+
+
+def test_idle_expired_session_is_denied_while_item_still_exists(two_apps, aws, fake_idp, ddb_config, monkeypatch):
+    from s4_auth_flask import extension
+
+    client = two_apps[0].test_client()
+    sign_in(client, fake_idp)
+    assert client.get("/reports", base_url=HTTPS).status_code == 200
+    assert len(aws.Table(TABLE).scan()["Items"]) == 1
+    later = time.time() + ddb_config.idle_timeout.total_seconds() + 1
+    monkeypatch.setattr(extension, "_now", lambda: later)
+    assert len(aws.Table(TABLE).scan()["Items"]) == 1
+    assert client.get("/reports", base_url=HTTPS, headers=HTML).status_code in (302, 401)
