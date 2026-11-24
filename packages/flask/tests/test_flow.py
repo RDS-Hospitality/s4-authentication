@@ -90,6 +90,20 @@ def test_session_cookie_flags_and_rotation(make_app, fake_idp):
     assert before.split(";")[0] != after.split(";")[0]
 
 
+def test_old_session_id_is_dead_after_login(make_app, fake_idp):
+    app = make_app()
+    client = app.test_client()
+    first, q = start_login(client)
+    old_sid = sid_cookie(first).split(";")[0].split("=", 1)[1]
+    iface = app.session_interface
+    assert iface.cache.get(iface._get_store_id(old_sid)) is not None
+    finish_login(client, fake_idp, q)
+    assert iface.cache.get(iface._get_store_id(old_sid)) is None
+    stranger = app.test_client()
+    stranger.set_cookie("s4_session", old_sid, domain="localhost")
+    assert stranger.get("/whoami", base_url=HTTPS).get_json()["claims"] is None
+
+
 def test_no_token_reaches_the_browser(make_app, fake_idp):
     client = make_app().test_client()
     responses = []
@@ -158,3 +172,29 @@ def test_prefix_mount_scopes_cookie_and_return_path(make_app, fake_idp, config):
     resp, _ = finish_login(client, fake_idp, q, base_url=base)
     assert resp.status_code == 303
     assert resp.headers["Location"] == "/dash/"
+
+
+def _assert_no_secrets(responses, tokens):
+    secrets = [tokens["id_token"], tokens["access_token"], tokens["refresh_token"]]
+    for r in responses:
+        blob = str(r.headers) + r.get_data(as_text=True)
+        for secret in secrets:
+            assert secret not in blob
+
+
+def test_no_token_reaches_the_browser_on_error_paths(make_app, fake_idp):
+    client = make_app().test_client()
+    seen = []
+    first, q = start_login(client)
+    seen.append(first)
+    other = RSAKey.generate_key(2048, {"kid": fake_idp.kid, "use": "sig", "alg": "RS256"})
+    forged = fake_idp.id_token(nonce=q["nonce"], signer=other)
+    bad, tokens = finish_login(client, fake_idp, q, id_token=forged)
+    seen.append(bad)
+    seen.append(client.get("/whoami", base_url=HTTPS))
+    _assert_no_secrets(seen, {**tokens, "id_token": forged})
+
+    _, q2 = start_login(client)
+    ok, tokens2 = finish_login(client, fake_idp, q2)
+    replay = client.get(f"/auth/callback?code=abc&state={q2['state']}", base_url=HTTPS)
+    _assert_no_secrets([ok, replay], tokens2)
