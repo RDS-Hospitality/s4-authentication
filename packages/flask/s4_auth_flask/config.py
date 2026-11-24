@@ -83,7 +83,7 @@ class AuthConfig:
     @property
     def logout_url(self) -> str:
         query = urlencode(
-            {"client_id": self.client_id, "logout_uri": f"{self.base_url}/"}
+            {"client_id": self.client_id, "logout_uri": f"{self.base_url}/auth/signed-out"}
         )
         return f"https://{self.cognito_domain}/logout?{query}"
 

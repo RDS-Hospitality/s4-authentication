@@ -45,7 +45,7 @@ def test_derived_urls():
     assert c.revoke_url == f"https://{DOMAIN}/oauth2/revoke"
     assert c.logout_url == (
         f"https://{DOMAIN}/logout?client_id=abc"
-        "&logout_uri=https%3A%2F%2Fdash.example.com%2F"
+        "&logout_uri=https%3A%2F%2Fdash.example.com%2Fauth%2Fsigned-out"
     )
 
 

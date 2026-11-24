@@ -56,8 +56,9 @@ The adapter registers three routes under `/auth`:
 | Route | Does |
 |-------|------|
 | `GET /auth/login` | Starts sign-in (redirects to Cognito). Goes straight to the landing page if already signed in. |
-| `GET /auth/callback` | Completes sign-in, verifies the ID token, issues a fresh session id, redirects (303). A failed sign-in redirects back to login. |
+| `GET /auth/callback` | Completes sign-in, verifies the ID token, issues a fresh session id, redirects (303). A stale or replayed callback redirects back to login; an IdP refusal shows a 401 page with the reason; an IdP outage shows a 503 page. |
 | `POST /auth/logout` | Revokes the refresh token, deletes the server session, expires the cookie, redirects to Cognito's logout. |
+| `GET /auth/signed-out` | Where Cognito's logout lands: "You are signed out." with a sign-in link. Public; never redirects. |
 
 ## Configuration
 
@@ -135,7 +136,7 @@ The operator does these steps. The adapter never creates AWS resources.
    - Identity provider: Google. Flow: authorization code. **No client secret.**
    - Scopes: `openid`, `email`, `profile`.
    - Token validity: access 60 minutes, ID 60 minutes, refresh 1 day.
-   - Callback URL: `{base_url}/auth/callback`. Sign-out URL: `{base_url}/`.
+   - Callback URL: `{base_url}/auth/callback`. Sign-out URL: `{base_url}/auth/signed-out`.
 2. **Domain-gate allowlist.** Add the new client id to the pool's inbound-federation
    domain-gate allowlist. On the fleet pool this is the `DOMAIN_GATE_ALLOWLIST` of the
    domain-gate Lambda. **Without it, sign-in is refused.**

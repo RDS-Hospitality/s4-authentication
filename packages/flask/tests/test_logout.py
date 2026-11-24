@@ -111,3 +111,14 @@ def test_logout_when_record_delete_fails_is_503_and_expires_cookie(client, app_o
     assert resp.status_code == 503
     assert "Location" not in resp.headers
     assert _expired(resp)
+
+
+def test_signed_out_page_is_public_and_links_to_login(make_app):
+    client = make_app().test_client()
+    resp = client.get("/auth/signed-out", base_url=HTTPS)
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "You are signed out." in body
+    assert 'href="/auth/login"' in body
+    assert "Location" not in resp.headers
+    assert sid_cookie(resp) is None

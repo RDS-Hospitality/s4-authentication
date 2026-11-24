@@ -243,7 +243,7 @@ table, and the four AWS steps per app:
 
 1. An app client: Google, authorization code flow, no client secret, scopes
    `openid email profile`, tokens valid 60 min / 60 min / 1 day, callback
-   `{base_url}/auth/callback`, sign-out URL `{base_url}/`.
+   `{base_url}/auth/callback`, sign-out URL `{base_url}/auth/signed-out`.
 2. An entry for the client id in the pool's inbound-federation domain-gate allowlist. Without
    it sign-in is refused.
 3. If the app uses roles: the client in the role Lambda's claims-emission set, plus a Cognito

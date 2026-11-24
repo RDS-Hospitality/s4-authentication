@@ -343,13 +343,20 @@ class S4Auth:
                 return Response("Sign-out could not be completed; try again shortly.", 503)
             return redirect(config.logout_url, 303)
 
+        @bp.get("/signed-out")
+        @adapter_view
+        def signed_out() -> Any:
+            # Cognito's logout lands here. It must never redirect: a redirect to a guarded
+            # page would start a new sign-in the user did not ask for.
+            return _page(200, "You are signed out.", "", _login_url(), "Sign in")
+
         return bp
 
 
-def _page(status: int, title: str, detail: Any, link: str) -> Response:
+def _page(status: int, title: str, detail: Any, link: str, link_text: str = "Try again") -> Response:
     body = (
         f"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>{title}</title></head>"
-        f"<body><h1>{title}</h1><p>{detail}</p><p><a href=\"{link}\">Try again</a></p></body></html>"
+        f"<body><h1>{title}</h1><p>{detail}</p><p><a href=\"{link}\">{link_text}</a></p></body></html>"
     )
     return Response(body, status, mimetype="text/html")
 
