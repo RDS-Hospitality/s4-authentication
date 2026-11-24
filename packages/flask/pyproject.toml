@@ -16,8 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dynamodb = ["boto3"]
-test = ["pytest", "responses", "moto[dynamodb]", "cryptography", "boto3"]
+dynamodb = ["boto3", "mypy-boto3-dynamodb"]
+test = ["pytest", "responses", "moto[dynamodb]", "cryptography", "boto3", "mypy-boto3-dynamodb"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["s4_auth_flask"]

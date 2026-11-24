@@ -30,6 +30,10 @@ _CALLBACK_FAILURES = (OAuthError, JoseError, TokenInvalid)
 
 _log = logging.getLogger("s4_auth_flask")
 
+# Mirrors what Flask-Session's DynamoDB interface reads and writes (dynamodb.py: KeySchema "id",
+# TTL "expiration"); the adapter never creates the table, so setup docs quote this.
+DYNAMODB_TABLE_SHAPE = {"partition_key": "id", "key_type": "S", "ttl_attribute": "expiration"}
+
 _ACTIVITY_WRITE_INTERVAL = 60
 _REFRESH_SKEW = 60
 _HTTP_TIMEOUT = 10
@@ -58,6 +62,26 @@ def _origin(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+class _NeverCreateTable:
+    """Resource proxy whose create_table reports the table as already existing.
+
+    Flask-Session's DynamoDB interface calls create_table unconditionally at startup and
+    ignores SESSION_DYNAMODB_TABLE_EXISTS; the adapter must never create AWS resources.
+    """
+
+    def __init__(self, resource: Any) -> None:
+        self._resource = resource
+
+    def create_table(self, **_: Any) -> None:
+        raise self._resource.meta.client.exceptions.ResourceInUseException(
+            {"Error": {"Code": "ResourceInUseException", "Message": "table is managed outside the adapter"}},
+            "CreateTable",
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resource, name)
+
+
 class _UnusableSession(dict, SessionMixin):
     """Stand-in when the session store failed; the guard denies on it and it is never saved."""
 
@@ -84,7 +108,12 @@ class _FailClosedSessions(SessionInterface):
         if getattr(sess, "s4_unusable", False):
             _log.warning("s4-auth: not saving a session whose store failed on open")
             return None
-        return self._inner.save_session(app, sess, response)
+        try:
+            return self._inner.save_session(app, sess, response)
+        except Exception:
+            # The session is lost, so the next request has no sign-in and is denied.
+            _log.exception("s4-auth: session store failed on save; the session was not persisted")
+            return None
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -130,8 +159,8 @@ class S4Auth:
         if config.session_backend == "dynamodb":
             app.config.update(
                 SESSION_TYPE="dynamodb",
-                SESSION_DYNAMODB=self.session_resource,
-                SESSION_DYNAMODB_TABLE_NAME=config.session_table,
+                SESSION_DYNAMODB=_NeverCreateTable(self.session_resource),
+                SESSION_DYNAMODB_TABLE=config.session_table,
                 SESSION_DYNAMODB_TABLE_EXISTS=True,
             )
         else:
