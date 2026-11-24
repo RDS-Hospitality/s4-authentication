@@ -292,12 +292,13 @@ browser ignores this section.
 **Rule.**
 - **(C2) Tokens stay server-side.** The server holds the tokens. The browser
   holds only an opaque session identifier, in a cookie marked `Secure`,
-  `HttpOnly` and `SameSite`. The identifier is regenerated at sign-in, so one
-  issued before sign-in never names the signed-in session. Verification of the
-  token is unchanged.
-- **(C3) Idle timeout is server-enforced.** The server measures idleness from
-  the session's last activity, recorded at a granularity of one minute or
-  finer. Whether the browser keeps or drops its cookie has no effect on the
+  `HttpOnly` and `SameSite=Lax` or `SameSite=Strict` (never `None`). The
+  identifier is regenerated at sign-in, so one issued before sign-in never
+  names the signed-in session. Verification of the token is unchanged.
+- **(C3) Idle timeout is server-enforced.** Under this profile the idle timeout
+  (`session.idleTimeout`) is enforced on the server, not the client. The server
+  measures idleness from the session's last activity, recorded at a granularity
+  of one minute or finer. Whether the browser keeps or drops its cookie has no effect on the
   timeout.
 - **(C4) "Clears all locally stored tokens" means** the server's session record
   is deleted and the cookie is expired in the browser. A session identifier
@@ -322,10 +323,11 @@ there is none; what is a guard's redirect for a form post).
 
 **Conformance test.**
 - No token appears in any `Set-Cookie` or response body.
-- The session cookie carries the three flags, and its value differs before and
+- The session cookie carries `Secure`, `HttpOnly` and `SameSite=Lax` or `Strict`, and its value differs before and
   after sign-in.
-- After 31 idle minutes the next request demands re-authentication; an expired
-  access token with a valid refresh token does not.
+- After the session has been idle for longer than `session.idleTimeout`, the
+  next request demands re-authentication; an expired access token with a valid
+  refresh token does not.
 - After logout the old session identifier is rejected and a protected page
   demands full re-authentication.
 - The callback is answered by a 3xx.
@@ -354,7 +356,7 @@ CFN `Outputs` (`infra/cognito/`).
 | `postLoginRoute` | Single post-login landing route | C6 |
 | `session.accessTtl` | Access/ID token TTL — **60 min** | C3 |
 | `session.refreshTtl` | Refresh token TTL — **1 d** default (raise per product only with a recorded reason) | C3 |
-| `session.idleTimeout` | Idle logout — **30 min** (client-side; no app-client field) | C3 |
+| `session.idleTimeout` | Idle logout — **30 min** (client-side; no app-client field; server-side under the Server-session profile) | C3 |
 | `graphqlUrls` | Data-API endpoints that receive the bearer token — absolute origins or same-origin path prefixes; empty = none | C9 |
 | `roleClaim` | Claim holding the allowed roles — fleet default `hasura_allowed_roles`, read from the **ID token** | C9 |
 | `defaultRoleClaim` | Claim holding the default role — fleet default `hasura_default_role`, read from the **ID token** | C9 |

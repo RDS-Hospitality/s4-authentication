@@ -157,11 +157,11 @@ profile (SP)" in `/STANDARD.md`). Each check names the clause it restates.
       network tab; search each response for the ID, access and refresh token
       values.
 - [ ] **S2.2** 👁/🔍 (C2) The session cookie carries `Secure`, `HttpOnly` and
-      `SameSite` (👁: devtools Application tab, or `curl -i` on the callback
-      response; 🔍: the flags are set in the adapter's cookie configuration).
+      `SameSite=Lax` or `SameSite=Strict` (`None` fails)
+      (👁: devtools Application tab, or `curl -i` on the callback response; 🔍: the flags are set in the adapter's cookie configuration).
       The cookie value after sign-in differs from the value before it.
-- [ ] **S3.1** 👁 (C3) Idle for 31 minutes, then request a protected page:
-      full re-authentication is demanded.
+- [ ] **S3.1** 👁 (C3) Idle for longer than `session.idleTimeout`, then request a protected
+      page: full re-authentication is demanded.
 - [ ] **S3.2** 👁 (C3) With the access token expired and the refresh token still
       valid, the next request succeeds without a login redirect.
 - [ ] **S4.1** 👁 (C4) After logout, replaying the old session identifier is
