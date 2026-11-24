@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "s4-auth-flask"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "authlib>=1.3",
+    "requests",
+    "flask-session>=0.8",
+    "cachelib",
+]
+
+[project.optional-dependencies]
+dynamodb = ["boto3"]
+test = ["pytest", "responses", "moto[dynamodb]", "cryptography", "boto3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["s4_auth_flask"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
