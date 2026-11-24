@@ -17,7 +17,7 @@ from flask_session import Session
 from joserfc.errors import JoseError
 
 from s4_auth_flask.config import AuthConfig
-from s4_auth_flask.guards import adapter_view, deny, guard, signed_in
+from s4_auth_flask.guards import adapter_view, deny, guard, request_is_same_origin, signed_in
 from s4_auth_flask.redirects import safe_return_path
 from s4_auth_flask.tokens import TokenInvalid, verify_id_token
 
@@ -64,11 +64,6 @@ def _expire_cookie(response: Any) -> Any:
         samesite=interface.get_cookie_samesite(app),
     )
     return response
-
-
-def _origin(url: str) -> str:
-    parts = urlsplit(url)
-    return f"{parts.scheme}://{parts.netloc}"
 
 
 class _NeverCreateTable:
@@ -336,8 +331,7 @@ class S4Auth:
         def logout() -> Any:
             # Exempt from the guard so an expired session can still log out; the origin check
             # is the CSRF defence, and a request carrying neither header is refused.
-            source = request.headers.get("Origin") or request.headers.get("Referer")
-            if not source or _origin(source) != _origin(config.base_url):
+            if not request_is_same_origin(config.base_url):
                 abort(403)
             if not self.end_session():
                 return Response("Sign-out could not be completed; try again shortly.", 503)

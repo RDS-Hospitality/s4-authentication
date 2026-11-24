@@ -5,7 +5,7 @@ import logging
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
-from flask import Response, abort, current_app, redirect, request, session, url_for
+from flask import Response, abort, after_this_request, current_app, redirect, request, session, url_for
 
 from s4_auth_flask.roles import has_any_role, read_roles, warn_if_no_role_claim
 from s4_auth_flask.url_allowlist import matches_allowlist
@@ -91,14 +91,59 @@ def deny() -> Response:
     return redirect(url_for("s4_auth.login"), 302)
 
 
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def origin_of(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def request_is_same_origin(base_url: str) -> bool:
+    """True when Origin (else Referer) names the app's own origin. Neither header, or `null`, fails."""
+    source = request.headers.get("Origin") or request.headers.get("Referer")
+    return bool(source) and origin_of(source) == origin_of(base_url)
+
+
+def _no_store(response: Response) -> Response:
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _apply_lifetime_to_exempt_request() -> None:
+    """Let an exempt view see an ended session instead of stale claims.
+
+    The deny response is discarded because the view is public; the remembered return path is
+    restored so a public page is not recorded as the place to land after sign-in.
+    """
+    from s4_auth_flask.extension import RETURN_TO
+
+    if _claims() is None:
+        return
+    previous = session.get(RETURN_TO)
+    _auth().enforce_lifetime()
+    if previous is None:
+        session.pop(RETURN_TO, None)
+    else:
+        session[RETURN_TO] = previous
+
+
 def guard() -> Response | None:
     """before_request hook: every request is denied unless exempt or signed in."""
     if _is_exempt():
+        endpoint = request.endpoint
+        view = current_app.view_functions.get(endpoint) if endpoint else None
+        if endpoint == "static" or getattr(view, _PUBLIC_ATTR, False):
+            _apply_lifetime_to_exempt_request()
         return None
+    after_this_request(_no_store)
     claims = _claims()
     if claims is None:
         return deny()
-    warn_if_no_role_claim(claims, _auth().config.role_claim, _warn)
+    config = _auth().config
+    if request.method in _UNSAFE_METHODS and not request_is_same_origin(config.base_url):
+        abort(403)
+    warn_if_no_role_claim(claims, config.role_claim, _warn)
     return _auth().enforce_lifetime()
 
 
@@ -134,15 +179,10 @@ def current_user() -> dict | None:
     return {**claims, "roles": current_roles()}
 
 
-def _origin_of(url: str) -> str:
-    parts = urlsplit(url)
-    return f"{parts.scheme}://{parts.netloc}"
-
-
 def auth_headers(url: str) -> dict[str, str]:
     """Bearer header for a data-layer URL, only if the URL is on the configured allowlist."""
     config = _auth().config
     token = _tokens().get("id_token")
-    if not token or not matches_allowlist(url, config.graphql_urls, _origin_of(config.base_url)):
+    if not token or not matches_allowlist(url, config.graphql_urls, origin_of(config.base_url)):
         return {}
     return {"Authorization": f"Bearer {token}"}
