@@ -18,9 +18,10 @@
 #   package.json, schematics/   (Angular payload, at ROOT)
 # React ships copy-in source (src/) at root; its npx CLI is bundled in a later work unit.
 #
-# Usage: export-main.sh [--version X.Y.Z] [--only angular|react]
-#   --version  stamp each framework's package.json (if present) and cut tag <fw>-vX.Y.Z
-#   --only     publish a single framework (default: both)
+# Usage: export-main.sh [--version X.Y.Z] [--only angular|react|flask]
+#   --version  stamp each framework's package.json / pyproject.toml (if present) and cut tag <fw>-vX.Y.Z
+#   --only     publish a single framework (default: angular and react; flask is opt-in
+#              because it versions independently — release it with `--only flask`)
 #
 # SAFETY INVARIANT: the ONLY mutations to real refs are
 #   `git branch -f angular` / `git branch -f react`  (+ optional annotated tag <fw>-vX.Y.Z).
@@ -53,8 +54,8 @@ ROOT_MANIFEST="$REPO_ROOT/scripts/curated-manifest-root.txt"
 FRAMEWORKS=(angular react)
 if [[ -n "$ONLY" ]]; then
   case "$ONLY" in
-    angular|react) FRAMEWORKS=("$ONLY") ;;
-    *) echo "ERROR: --only must be 'angular' or 'react' (got '$ONLY')" >&2; exit 2 ;;
+    angular|react|flask) FRAMEWORKS=("$ONLY") ;;
+    *) echo "ERROR: --only must be 'angular', 'react' or 'flask' (got '$ONLY')" >&2; exit 2 ;;
   esac
 fi
 
@@ -120,7 +121,7 @@ publish_framework() {
   echo "[$fw] staging $fw payload at root..."
   bash "$REPO_ROOT/packages/$fw/scripts/export.sh" "$STAGE"
 
-  # 3. Version-stamp this framework's package.json, if it has one and --version given.
+  # 3. Version-stamp this framework's package.json / pyproject.toml, if it has one and --version given.
   if [[ -n "$VERSION" ]]; then
     if [[ -f "$STAGE/package.json" ]]; then
       node -e '
@@ -131,8 +132,15 @@ publish_framework() {
         fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
       ' "$STAGE/package.json" "$VERSION"
       echo "[$fw] stamped package.json version=$VERSION"
+    elif [[ -f "$STAGE/pyproject.toml" ]]; then
+      # Exact-line substitution of the [project] version. Fail rather than ship an unstamped
+      # build: the tag would claim a version the wheel metadata does not carry.
+      grep -qE '^version = "[^"]*"$' "$STAGE/pyproject.toml" \
+        || { echo "ERROR: [$fw] no exact 'version = \"...\"' line in pyproject.toml to stamp" >&2; exit 1; }
+      sed -i -E "s/^version = \"[^\"]*\"\$/version = \"$VERSION\"/" "$STAGE/pyproject.toml"
+      echo "[$fw] stamped pyproject.toml version=$VERSION"
     else
-      echo "[$fw] no package.json to stamp (copy-in payload) — tagging only"
+      echo "[$fw] no package.json or pyproject.toml to stamp (copy-in payload) — tagging only"
     fi
   fi
 
